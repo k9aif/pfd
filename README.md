@@ -80,6 +80,8 @@ did. Every formula is listed at the bottom of the page.
 - Runs on your computer at `http://localhost:8118`. It is not a website and has no cloud service.
 - No bank logins, no account numbers, no analytics, no outside scripts or fonts.
 - Each dashboard is a JSON file in a local folder (mode 600), with one backup per day.
+- **Reset to sample** (two clicks) puts a dashboard back to the sample numbers. What it replaced is kept in
+  `backups/<dashboard>-before-reset-<time>.json`.
 - It cannot see or move money. Sign-in protects privacy between people on the same computer.
 - Optional: a local AI model ([Ollama](https://ollama.com)) can explain the advice in plain English.
   It receives a rounded summary only, and only when you press **Explain**. Leave it unset and
