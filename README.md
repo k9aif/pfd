@@ -137,3 +137,4 @@ ubuntu/              Containerfile + build-run.sh for the Podman host
 - **Phase 2: account sync (read-only).** E*TRADE Accounts API (OAuth 1.0a; consumer
   key/secret in `.env`, daily browser approval) and/or SimpleFIN Bridge for other
   institutions. Only GET endpoints for balances and positions; account numbers never stored.
+# pfd
