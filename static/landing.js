@@ -1,11 +1,11 @@
 const $ = (id) => document.getElementById(id);
 
-async function showSetupIfNeeded() {
+async function showDemoHint() {
   try {
     const status = await (await fetch('/api/status')).json();
-    if (!status.usersConfigured) {
-      $('login-form').hidden = true;
-      $('setup').hidden = false;
+    if (status.demo) {
+      $('demo-hint').hidden = false;
+      $('name').value = 'demo';
     }
   } catch {
     // The form still works; a real error will show when signing in.
@@ -36,7 +36,20 @@ async function signIn(e) {
   }
 }
 
+async function copyCode(e) {
+  const button = e.target.closest('[data-copy]');
+  if (!button) return;
+  try {
+    await navigator.clipboard.writeText($(button.dataset.copy).textContent);
+    button.textContent = 'Copied';
+  } catch {
+    button.textContent = 'Select and copy';
+  }
+  setTimeout(() => { button.textContent = 'Copy'; }, 2000);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   $('login-form').addEventListener('submit', signIn);
-  showSetupIfNeeded();
+  document.addEventListener('click', copyCode);
+  showDemoHint();
 });

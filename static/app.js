@@ -1,5 +1,6 @@
 import {
-  ASSET_CLASSES, TIER_KEYS, combineHousehold, fmtAge, fmtMoney, householdState, monthlySavings, netWorth, pct,
+  ASSET_CLASSES, HOLDING_ACCOUNTS, TIER_KEYS, applyHoldings, combineHousehold, fmtAge, fmtMoney, guessClass,
+  holdingTotals, holdingValue, holdingsActive, householdState, monthlySavings, netWorth, newHolding, pct,
   planTier, projectBalances, sampleState, stressTests, summary, vestedAfterDrawdown, whatIf, withDefaults,
 } from './finance.js';
 import { SUCCESS_GOAL, adviceBrief, evaluateTiers, personalFlags } from './advice.js';
@@ -86,7 +87,9 @@ const INPUT_GROUPS = [
   },
 ];
 
-const get = (path) => path.split('.').reduce((o, k) => o?.[k], state);
+const get = (path, from = state) => path.split('.').reduce((o, k) => o?.[k], from);
+// The dashboard as the math sees it before household totals: typed numbers, or holdings when switched on.
+let applied = state;
 function set(path, value) {
   const keys = path.split('.');
   const last = keys.pop();
@@ -94,7 +97,8 @@ function set(path, value) {
 }
 
 function fieldHtml(f) {
-  const v = get(f.path);
+  const fromHoldings = applied._derived?.includes(f.path);
+  const v = get(f.path, fromHoldings ? applied : state);
   const hint = f.hint ? `<span class="hint">${f.hint}</span>` : '';
   const id = `f-${f.path.replace('.', '-')}`;
   const label = `<label for="${id}">${f.label}${hint}</label>`;
@@ -114,8 +118,10 @@ function fieldHtml(f) {
         : f.kind === 'moneyPeriodic' && period === 'annual' ? v * 12 : v;
       const step = f.kind === 'fraction' ? f.step ?? 0.5 : f.kind === 'age' || f.kind === 'percent' ? 1 : 1000;
       const suffix = f.kind === 'moneyPeriodic' ? ` <span class="hint">${period === 'annual' ? 'per year' : 'per month'}</span>` : '';
-      return `<div class="field"><label for="${id}">${f.label}${suffix}${hint}</label>
-        <input id="${id}" type="number" inputmode="decimal" step="${step}" min="0" value="${shown}" data-path="${f.path}" data-kind="${f.kind}"></div>`;
+      const note = fromHoldings ? '<span class="hint">From holdings</span>' : '';
+      const display = fromHoldings && f.kind === 'money' ? Math.round(shown) : shown;
+      return `<div class="field"><label for="${id}">${f.label}${suffix}${hint}${note}</label>
+        <input id="${id}" type="number" inputmode="decimal" step="${step}" min="0" value="${display}" data-path="${f.path}" data-kind="${f.kind}"${fromHoldings ? ' disabled' : ''}></div>`;
     }
   }
 }
@@ -128,6 +134,7 @@ function escapeHtml(v) {
 }
 
 function renderInputs() {
+  applied = applyHoldings(state);
   $('cashflow-form').innerHTML = `<fieldset>${CASHFLOW_FIELDS.map(fieldHtml).join('')}</fieldset>
     <div class="metric" style="margin-top:12px"><span>Saved ${period === 'annual' ? 'per year' : 'per month'}</span><b id="saved-line"></b></div>`;
   $('inputs').innerHTML = INPUT_GROUPS.map((g) =>
@@ -162,7 +169,8 @@ function members() {
 }
 
 function renderOutputs() {
-  view = current === me.household ? combineHousehold(state, members()) : state;
+  applied = applyHoldings(state);
+  view = current === me.household ? combineHousehold(applied, members().map(applyHoldings)) : applied;
   const m = summary(view);
   $('sample-banner').hidden = !state.isSample;
   renderHouseholdNote();
@@ -249,7 +257,7 @@ function renderAllocation() {
   const rows = ASSET_CLASSES.map((c) => `<div class="alloc-row">
       <i class="legend box" style="background:${CLASS_COLORS[c.key]};width:12px;height:12px;border-radius:3px"></i>
       <label for="a-${c.key}">${c.label}</label>
-      <input id="a-${c.key}" type="number" min="0" max="100" step="1" value="${view.allocation[c.key] ?? 0}" data-alloc="${c.key}">
+      <input id="a-${c.key}" type="number" min="0" max="100" step="1" value="${view.allocation[c.key] ?? 0}" data-alloc="${c.key}"${holdingsActive(state) ? ' disabled' : ''}>
       <span class="tgt">${target[c.key]}%</span></div>`).join('');
   const existing = document.activeElement?.dataset?.alloc;
   if (existing) {
@@ -497,6 +505,94 @@ async function explainWithLlm(brief) {
   }
 }
 
+// ---- Holdings ---------------------------------------------------------------
+
+function renderHoldings() {
+  const h = state.holdings;
+  $('holdings-use').checked = h.use;
+  const rows = h.rows;
+  if (!rows.length) {
+    $('holdings').innerHTML = '<tbody><tr><td class="note">No holdings yet. Add one row per fund, stock or cash balance; '
+      + 'add another row for each new purchase lot if you want its cost basis tracked.</td></tr></tbody>';
+  } else {
+    const accountOpts = (sel) => HOLDING_ACCOUNTS.map((a) => `<option value="${a.key}" ${a.key === sel ? 'selected' : ''}>${a.label}</option>`).join('');
+    const classOpts = (sel) => ASSET_CLASSES.map((c) => `<option value="${c.key}" ${c.key === sel ? 'selected' : ''}>${c.label}</option>`).join('');
+    const num = (i, field, v, step = 'any') =>
+      `<input type="number" inputmode="decimal" min="0" step="${step}" value="${v || ''}" data-row="${i}" data-field="${field}" aria-label="${field}">`;
+    $('holdings').innerHTML = `<thead><tr><th>Account</th><th>Name / ticker</th><th>Asset class</th><th>Shares</th><th>Price</th>
+      <th>Value</th><th>Cost basis</th><th>Gain</th><th></th></tr></thead><tbody>${rows.map((r, i) => {
+        const computed = Number(r.shares) > 0 && Number(r.price) > 0;
+        return `<tr>
+          <td><select data-row="${i}" data-field="account" aria-label="Account">${accountOpts(r.account)}</select></td>
+          <td><input type="text" value="${escapeAttr(r.name)}" data-row="${i}" data-field="name" aria-label="Name or ticker" placeholder="VTI"></td>
+          <td><select data-row="${i}" data-field="assetClass" aria-label="Asset class" ${r.account === 'company' ? 'disabled' : ''}>${classOpts(r.account === 'company' ? 'satellite' : r.assetClass)}</select></td>
+          <td>${num(i, 'shares', r.shares)}</td>
+          <td>${num(i, 'price', r.price)}</td>
+          <td>${computed ? `<span class="num" id="hv-${i}">${fmtMoney(holdingValue(r))}</span>` : num(i, 'value', r.value, 100)}</td>
+          <td>${num(i, 'basis', r.basis, 100)}</td>
+          <td class="num" id="hg-${i}">${gainText(r)}</td>
+          <td><button type="button" class="link" data-del-row="${i}" aria-label="Remove row">✕</button></td></tr>`;
+      }).join('')}</tbody>`;
+  }
+  renderHoldingTotals();
+}
+
+function gainText(r) {
+  if (!(Number(r.basis) > 0)) return '—';
+  const g = holdingValue(r) - Number(r.basis);
+  return `<span class="${g >= 0 ? 'up' : 'down'}">${fmtMoney(g)}</span>`;
+}
+
+function renderHoldingTotals() {
+  const { byAccount, total } = holdingTotals(state.holdings.rows);
+  $('holdings-totals').innerHTML = state.holdings.rows.length
+    ? `${HOLDING_ACCOUNTS.filter((a) => byAccount[a.key]).map((a) => `${a.label} <b>${fmtMoney(byAccount[a.key])}</b>`).join(' · ')}`
+      + ` · Total <b>${fmtMoney(total)}</b>${state.holdings.use ? '' : ' <span class="muted">(not used: switch on to replace the typed totals)</span>'}`
+    : '';
+}
+
+function holdingsChanged() {
+  state.isSample = false;
+  renderInputs();
+  renderOutputs();
+  scheduleSave();
+}
+
+function onHoldingInput(e) {
+  const el = e.target;
+  const i = Number(el.dataset.row);
+  const field = el.dataset.field;
+  if (!field || !state.holdings.rows[i]) return;
+  const row = state.holdings.rows[i];
+  if (el.tagName === 'SELECT' || field === 'name') {
+    row[field] = el.value;
+    if (field === 'name') {
+      const guess = guessClass(el.value);
+      if (guess && row.account !== 'company' && row.account !== 'cash') {
+        row.assetClass = guess;
+        const sel = el.closest('tr').querySelector('[data-field="assetClass"]');
+        if (sel) sel.value = guess;
+      }
+    }
+    if (field === 'account' && el.value === 'cash') row.assetClass = 'cash';
+  } else {
+    const n = Number(el.value);
+    if (!Number.isFinite(n) || n < 0) return;
+    row[field] = n;
+  }
+  // Switching between shares x price and a typed value changes the row's cells.
+  const computedBefore = $(`hv-${i}`) !== null;
+  const computedNow = Number(row.shares) > 0 && Number(row.price) > 0;
+  if (el.tagName === 'SELECT' || computedBefore !== computedNow) {
+    if (el.tagName === 'SELECT') renderHoldings();
+    else if (e.type === 'change') renderHoldings();
+  }
+  if ($(`hv-${i}`)) $(`hv-${i}`).textContent = fmtMoney(holdingValue(row));
+  if ($(`hg-${i}`)) $(`hg-${i}`).innerHTML = gainText(row);
+  renderHoldingTotals();
+  holdingsChanged();
+}
+
 // ---- Persistence ------------------------------------------------------------
 
 const WRITE_HEADERS = { 'Content-Type': 'application/json', 'X-PFD': '1' };
@@ -548,6 +644,7 @@ async function importJson(file) {
     docs[current] = state;
     sliders = null;
     renderInputs();
+    renderHoldings();
     renderOutputs();
     await save();
   } catch (err) {
@@ -569,6 +666,7 @@ async function load() {
     return;
   }
   $('who').textContent = displayName(me.user);
+  if (me.demo) $('who').textContent = 'Demo mode';
   $('log-month').value = new Date().toISOString().slice(0, 7);
   let saved = '';
   try { saved = localStorage.getItem('pfd-dashboard') || ''; } catch { /* storage blocked */ }
@@ -592,6 +690,7 @@ async function openDashboard(id) {
   const meta = state._meta;
   setStatus(meta ? `Last saved by ${displayName(meta.updatedBy)}, ${meta.updatedAt}` : 'Not saved yet');
   renderInputs();
+  renderHoldings();
   renderOutputs();
 }
 
@@ -664,6 +763,27 @@ document.addEventListener('DOMContentLoaded', () => {
     scheduleSave();
   });
   $('signout-btn').addEventListener('click', signOut);
+  $('holdings').addEventListener('input', onHoldingInput);
+  $('holdings').addEventListener('change', onHoldingInput);
+  $('holdings').addEventListener('click', (e) => {
+    const i = e.target.dataset.delRow;
+    if (i === undefined) return;
+    state.holdings.rows.splice(Number(i), 1);
+    renderHoldings();
+    holdingsChanged();
+  });
+  $('holding-add').addEventListener('click', () => {
+    state.holdings.rows.push(newHolding());
+    if (state.holdings.rows.length === 1) state.holdings.use = true;
+    renderHoldings();
+    holdingsChanged();
+    $('holdings').querySelector('tbody tr:last-child [data-field="name"]')?.focus();
+  });
+  $('holdings-use').addEventListener('change', (e) => {
+    state.holdings.use = e.target.checked;
+    renderHoldingTotals();
+    holdingsChanged();
+  });
   $('overlay').addEventListener('click', closeAdvice);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && $('drawer').classList.contains('open')) closeAdvice();

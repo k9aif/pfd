@@ -174,3 +174,40 @@ test('household adds members balances and flows, keeps its own assumptions', () 
   h.household.combineMembers = false;
   assert.equal(f.combineHousehold(h, [a, b]).accounts.taxable, 100000);
 });
+
+test('holdings replace typed totals, allocation and company stock when switched on', () => {
+  const s = f.sampleState();
+  s.holdings.rows = [
+    { account: 'taxable', name: 'VTI', assetClass: 'usStocks', shares: 100, price: 300, value: 0, basis: 20000 },
+    { account: 'preTax', name: '401k target fund', assetClass: 'bonds', shares: 0, price: 0, value: 50000, basis: 0 },
+    { account: 'company', name: 'IBM', assetClass: 'usStocks', shares: 10, price: 1000, value: 0, basis: 5000 },
+  ];
+  assert.equal(f.applyHoldings(s), s, 'off by default: typed totals win');
+  s.holdings.use = true;
+  const a = f.applyHoldings(s);
+  assert.deepEqual(a.accounts, { taxable: 30000, preTax: 50000, roth: 0, cash: 0 });
+  assert.equal(a.executive.vestedEquity, 10000);
+  assert.equal(a.allocation.usStocks, 33.3);
+  assert.equal(a.allocation.bonds, 55.6);
+  assert.equal(a.allocation.satellite, 11.1, 'company stock counts as concentrated, not index');
+  close(a.retirement.taxableGainFraction, (40000 - 25000) / 40000, 1e-12);
+  assert.equal(s.accounts.taxable, 692000, 'input is not mutated');
+});
+
+test('gain share stays assumed unless every taxable lot has a basis', () => {
+  const s = f.sampleState();
+  s.holdings.use = true;
+  s.holdings.rows = [
+    { account: 'taxable', name: 'VTI', shares: 1, price: 100, basis: 50 },
+    { account: 'taxable', name: 'VXUS', shares: 1, price: 100, basis: 0 },
+  ];
+  assert.equal(f.applyHoldings(s).retirement.taxableGainFraction, s.retirement.taxableGainFraction);
+});
+
+test('ticker guesses and value rules', () => {
+  assert.equal(f.guessClass(' vxus '), 'intlStocks');
+  assert.equal(f.guessClass('BND'), 'bonds');
+  assert.equal(f.guessClass('NVDA'), null);
+  assert.equal(f.holdingValue({ shares: 2, price: 10, value: 999 }), 20);
+  assert.equal(f.holdingValue({ shares: 0, price: 10, value: 999 }), 999);
+});

@@ -60,6 +60,7 @@ export function sampleState() {
     tiers: structuredClone(DEFAULT_TIERS),
     allocation: { usStocks: 50, intlStocks: 12, bonds: 15, realEstate: 0, cash: 9, satellite: 14 },
     household: { combineMembers: false },
+    holdings: { use: false, rows: [] },
     log: [],
   };
 }
@@ -109,6 +110,87 @@ export function withDefaults(saved) {
 }
 
 export const sum = (xs) => xs.reduce((a, b) => a + b, 0);
+
+// ---- Holdings ----------------------------------------------------------------
+// Optional rows (one per lot) that, when switched on, replace the typed account
+// totals, the company stock line and the allocation percentages.
+
+export const HOLDING_ACCOUNTS = [
+  { key: 'taxable', label: 'Taxable' },
+  { key: 'preTax', label: 'Pre-tax (401k, IRA)' },
+  { key: 'roth', label: 'Roth' },
+  { key: 'cash', label: 'Cash' },
+  { key: 'company', label: 'Company stock (vested)' },
+];
+
+// Common broad funds, so most rows get their asset class without asking.
+const KNOWN_TICKERS = {
+  usStocks: ['VTI', 'VOO', 'SPY', 'IVV', 'ITOT', 'SCHB', 'SCHX', 'QQQ', 'VUG', 'VTV', 'VB', 'AVUV', 'RSP',
+    'VTSAX', 'VFIAX', 'FSKAX', 'FXAIX', 'FZROX', 'SWTSX', 'SWPPX'],
+  intlStocks: ['VXUS', 'VEA', 'VWO', 'IXUS', 'IEFA', 'IEMG', 'SCHF', 'AVDV', 'VTIAX', 'FTIHX', 'FZILX', 'SWISX'],
+  bonds: ['BND', 'AGG', 'BNDX', 'SCHZ', 'VGIT', 'VGSH', 'VTIP', 'SCHP', 'TIP', 'GOVT', 'VBTLX', 'FXNAX', 'SWAGX'],
+  realEstate: ['VNQ', 'VNQI', 'SCHH', 'IYR', 'VGSLX'],
+  cash: ['SGOV', 'BIL', 'VMFXX', 'SPAXX', 'FDRXX', 'SWVXX'],
+};
+const TICKER_CLASS = Object.fromEntries(
+  Object.entries(KNOWN_TICKERS).flatMap(([cls, tickers]) => tickers.map((t) => [t, cls])));
+
+export function guessClass(ticker) {
+  return TICKER_CLASS[String(ticker ?? '').trim().toUpperCase()] ?? null;
+}
+
+export function newHolding(account = 'taxable') {
+  return { account, name: '', assetClass: account === 'cash' ? 'cash' : 'usStocks', shares: 0, price: 0, value: 0, basis: 0 };
+}
+
+// Shares x price when both are given, otherwise the value typed in.
+export function holdingValue(h) {
+  const shares = Number(h.shares) || 0;
+  const price = Number(h.price) || 0;
+  return shares > 0 && price > 0 ? shares * price : Number(h.value) || 0;
+}
+
+export function holdingsActive(s) {
+  return Boolean(s.holdings?.use && s.holdings.rows?.length);
+}
+
+export function holdingTotals(rows) {
+  const byAccount = Object.fromEntries(HOLDING_ACCOUNTS.map((a) => [a.key, 0]));
+  const byClass = Object.fromEntries(ASSET_CLASSES.map((c) => [c.key, 0]));
+  for (const h of rows) {
+    const v = holdingValue(h);
+    byAccount[h.account] = (byAccount[h.account] ?? 0) + v;
+    const cls = h.account === 'company' ? 'satellite' : h.assetClass;
+    byClass[cls in byClass ? cls : 'satellite'] += v;
+  }
+  return { byAccount, byClass, total: sum(Object.values(byAccount)) };
+}
+
+// Returns the state the math should use. `_derived` lists the input paths now
+// coming from holdings, so the form can show them as calculated.
+export function applyHoldings(s) {
+  if (!holdingsActive(s)) return s;
+  const out = structuredClone(s);
+  const rows = s.holdings.rows;
+  const { byAccount, byClass, total } = holdingTotals(rows);
+  out.accounts = { taxable: byAccount.taxable, preTax: byAccount.preTax, roth: byAccount.roth, cash: byAccount.cash };
+  out.executive.vestedEquity = byAccount.company;
+  out.executive.drawdownPct = s.executive.drawdownPct;
+  if (total > 0) {
+    out.allocation = Object.fromEntries(Object.entries(byClass).map(([k, v]) => [k, Math.round((v / total) * 1000) / 10]));
+  }
+  out._derived = ['accounts.taxable', 'accounts.preTax', 'accounts.roth', 'accounts.cash', 'executive.vestedEquity', 'allocation'];
+
+  // With a cost basis on every taxable lot, the gain share of a sale is known, not assumed.
+  const taxableRows = rows.filter((h) => (h.account === 'taxable' || h.account === 'company') && holdingValue(h) > 0);
+  if (taxableRows.length && taxableRows.every((h) => Number(h.basis) > 0)) {
+    const value = sum(taxableRows.map(holdingValue));
+    const basis = sum(taxableRows.map((h) => Number(h.basis)));
+    out.retirement.taxableGainFraction = Math.min(1, Math.max(0, (value - basis) / value));
+    out._derived.push('retirement.taxableGainFraction');
+  }
+  return out;
+}
 
 export function vestedAfterDrawdown(s) {
   return s.executive.vestedEquity * (1 - s.executive.drawdownPct / 100);

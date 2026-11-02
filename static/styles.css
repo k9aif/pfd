@@ -35,6 +35,8 @@
 }
 
 * { box-sizing: border-box; }
+/* `hidden` must win over any display rule below. */
+[hidden] { display: none !important; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
   font: 15px/1.5 var(--sans);
@@ -58,7 +60,6 @@ header.top .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: cen
 .tabs button { border-radius: 999px; padding: 6px 14px; }
 .tabs button.on { background: var(--sage); border-color: var(--sage); color: #fff; font-weight: 600; }
 #household-note { background: var(--sage-soft); border-color: var(--sage); display: grid; gap: 4px; }
-#household-note[hidden] { display: none; }
 #save-status.error { color: var(--red); }
 
 main { max-width: 1240px; margin: 0 auto; padding: 20px 16px 60px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
@@ -227,3 +228,20 @@ a.btn.primary { background: var(--gold); border-color: var(--gold); color: #fff;
 .signin .error { color: var(--red); margin: 4px 0 0; font-size: 0.9rem; }
 .signin pre { background: var(--surface-2); padding: 10px; border-radius: 8px; overflow-x: auto; }
 @media (max-width: 720px) { .flow .arrow { display: none; } }
+.run-own { border-color: var(--gold); }
+.run-own code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+.code-block { position: relative; margin: 12px 0; }
+.code-block pre { background: var(--surface-2); padding: 14px 16px; border-radius: 10px; overflow-x: auto; margin: 0; font-size: 0.86rem; line-height: 1.6; }
+.code-block .copy { position: absolute; top: 8px; right: 8px; padding: 3px 10px; font-size: 0.78rem; }
+.demo-hint { display: grid; gap: 4px; background: var(--gold-soft); border: 1px solid var(--gold); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; font-size: 0.88rem; }
+.demo-hint code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+
+/* Holdings table */
+table.holdings td { padding: 4px 4px; }
+table.holdings input, table.holdings select {
+  font: inherit; font-size: 0.85rem; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); width: 100%; min-width: 80px;
+}
+table.holdings input[type="number"] { text-align: right; min-width: 90px; }
+table.holdings input[data-field="name"] { min-width: 130px; }
+.field input:disabled, .alloc-row input:disabled { opacity: 0.75; border-style: dashed; }

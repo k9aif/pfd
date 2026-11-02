@@ -55,6 +55,9 @@ Bookmark `http://localhost:8118/app#advise` to open straight into the advice pan
 
 Up to three people, each with a login. Whoever holds `.env` is the admin.
 
+With no one added yet it runs in **demo mode**: sign in with `demo` / `demo` to explore sample
+numbers. Adding the first person turns demo login off.
+
 ```bash
 ./run.sh adduser ravi                 # or: ubuntu/build-run.sh adduser ravi (also restarts the container)
 ./run.sh passwd ravi                  # change a password
@@ -71,6 +74,16 @@ Up to three people, each with a login. Whoever holds `.env` is the admin.
 - Sessions expire after 12 idle hours; five wrong passwords lock sign-in for a minute.
 - The dashboard cannot see or move money. A login protects privacy, not accounts.
   Data files on disk are plain JSON (mode 600): FileVault protects them at rest.
+
+## Holdings (optional)
+
+Instead of typing account totals, add one row per fund, stock or cash balance: account
+(taxable, pre-tax, Roth, cash, vested company stock), name or ticker, asset class, shares and
+price (or just a value), and optional cost basis. With "Use holdings" on, the account totals,
+company stock line and allocation percentages come from the rows, and a cost basis on every
+taxable row replaces the assumed gain share. Common index funds get their asset class filled in.
+As you invest, raise the shares or add a row per purchase; update prices monthly, then
+**Update month** records the snapshot.
 
 ## Your data
 
@@ -110,7 +123,7 @@ live numbers. The code is in `static/finance.js` (math) and `static/advice.js` (
 
 ```
 server.py            stdlib HTTP server: sign-in, dashboards, /api/advise; user CLI
-static/finance.js    all calculations (pure, tested)
+static/finance.js    all calculations incl. holdings (pure, tested)
 static/advice.js     tier strategies, recommendation, personal flags
 static/landing.*     landing page and sign-in
 static/app.js        dashboard UI

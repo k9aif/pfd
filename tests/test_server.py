@@ -73,6 +73,16 @@ class EnvSlots(unittest.TestCase):
             server.parse_users({"PFD_USER_1": "ravi:plaintext"})
 
 
+class DemoMode(unittest.TestCase):
+    def test_demo_only_without_real_users(self):
+        users, demo = server.load_users({"PFD_USER_1": ""})
+        self.assertTrue(demo)
+        self.assertTrue(server.verify_password("demo", users["demo"]))
+        users, demo = server.load_users({"PFD_USER_1": "ravi:" + server.hash_password("long-password")})
+        self.assertFalse(demo)
+        self.assertNotIn("demo", users)
+
+
 class Http(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

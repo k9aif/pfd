@@ -27,6 +27,7 @@ import time
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timezone
+from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -52,6 +53,7 @@ SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "").rstrip("/")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "")
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "180"))
+REPO_URL = os.environ.get("PFD_REPO_URL", "").strip()
 BUILD = {"commit": os.environ.get("PFD_COMMIT", "dev"), "built": os.environ.get("PFD_BUILT", "dev")}
 
 CONTENT_TYPES = {
@@ -154,7 +156,20 @@ def update_env_users(env_file: Path, name: str, stored: str | None) -> str:
     return result
 
 
+# With no users in .env the app runs in demo mode: one "demo" login (password "demo")
+# shown on the landing page. Adding a real user turns it off.
+DEMO_USER = "demo"
+
+
+def load_users(env) -> tuple[dict[str, str], bool]:
+    users = parse_users(env)
+    if users:
+        return users, False
+    return {DEMO_USER: hash_password(DEMO_USER)}, True
+
+
 USERS: dict[str, str] = {}
+DEMO = False
 
 
 # ---- Sessions and login throttling -------------------------------------------
@@ -299,6 +314,8 @@ def render_page(name: str) -> bytes:
         lambda m: f'{m.group(1)}="/static/{m.group(2)}?v={asset_version(m.group(2))}"',
         html,
     )
+    # The landing page shows where to clone from; set PFD_REPO_URL once the repo is published.
+    html = html.replace("{{REPO_URL}}", escape(REPO_URL or "<repository URL>"))
     return html.encode("utf-8")
 
 
@@ -400,7 +417,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/healthz":
             self.send_json(HTTPStatus.OK, {"ok": True, **BUILD})
         elif path == "/api/status":
-            self.send_json(HTTPStatus.OK, {"usersConfigured": bool(USERS), "maxUsers": MAX_USERS})
+            self.send_json(HTTPStatus.OK, {"usersConfigured": not DEMO, "demo": DEMO, "maxUsers": MAX_USERS})
         elif path.startswith("/static/"):
             self.serve_static(path.removeprefix("/static/"))
         elif not path.startswith("/api/"):
@@ -410,7 +427,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/me":
             self.send_json(HTTPStatus.OK, {
                 "user": user, "users": list(USERS), "dashboards": dashboard_ids(), "household": HOUSEHOLD,
-                "llm": bool(OLLAMA_URL and OLLAMA_MODEL), "model": OLLAMA_MODEL, **BUILD,
+                "llm": bool(OLLAMA_URL and OLLAMA_MODEL), "model": OLLAMA_MODEL, "demo": DEMO, **BUILD,
             })
         elif path == "/api/dashboards":
             self.send_json(HTTPStatus.OK, {d: read_dashboard(d) for d in dashboard_ids()})
@@ -544,14 +561,14 @@ def cli(args: list[str]) -> None:
 
 
 def main() -> None:
-    global USERS
-    USERS = parse_users(os.environ)
+    global USERS, DEMO
+    USERS, DEMO = load_users(os.environ)
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8118"))
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     migrate_single_state()
     server = ThreadingHTTPServer((host, port), Handler)
-    who = ", ".join(USERS) if USERS else "none yet: run ./run.sh adduser <name>"
+    who = "demo mode (demo/demo); add yourself with ./run.sh adduser <name>" if DEMO else ", ".join(USERS)
     print(f"Personal Financial Dashboard on http://{host}:{port} (users: {who}; data: {DATA_DIR})", flush=True)
     server.serve_forever()
 

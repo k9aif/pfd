@@ -45,7 +45,7 @@
     <section class="card">
       <h2>How it works</h2>
       <ol class="steps">
-        <li><b>Enter rounded totals.</b> Categories, not accounts: taxable, retirement, cash, the house, company stock.</li>
+        <li><b>Enter your numbers.</b> Rounded totals per category, or add your holdings (fund, shares, price) and let it add them up. Your age and goals stay on this machine.</li>
         <li><b>Set your "enough".</b> What your chosen life costs per year, not what you spend today.</li>
         <li><b>Press Advise.</b> See which risk level gets you there with the most margin, and what to fix first.</li>
         <li><b>Update once a month.</b> Log the month, watch net worth and market growth, export a copy.</li>
@@ -86,6 +86,11 @@
 
     <section class="card signin" id="signin">
       <h2>Sign in</h2>
+      <div id="demo-hint" class="demo-hint" hidden>
+        <b>Demo login: demo / demo</b>
+        <span>Sample numbers to explore. Add yourself with <code>./run.sh adduser yourname</code>
+          and demo login turns off.</span>
+      </div>
       <form id="login-form" autocomplete="on">
         <label for="name">Name</label>
         <input id="name" name="username" autocomplete="username" autocapitalize="none" required>
@@ -94,11 +99,25 @@
         <button type="submit" class="primary">Sign in</button>
         <p id="login-error" class="error" role="alert" hidden></p>
       </form>
-      <div id="setup" hidden>
-        <p><b>No one can sign in yet.</b> Whoever looks after this computer adds people (up to three) from a terminal:</p>
-        <pre>./run.sh adduser yourname</pre>
-        <p class="muted small">Then restart the dashboard. Passwords are stored as one-way hashes in the .env file.</p>
+    </section>
+
+    <section class="card run-own">
+      <h2>Run your own</h2>
+      <p>Free and private: it runs on your computer and your numbers never leave it.
+        You need Python 3.11 or newer (no packages to install), or Podman if you prefer a container.</p>
+      <div class="code-block">
+        <button type="button" class="copy" data-copy="run-local">Copy</button>
+        <pre id="run-local">git clone {{REPO_URL}} personal-financial-dashboard
+cd personal-financial-dashboard
+cp .env.example .env
+./run.sh adduser yourname    # up to 3 people; asks for a password
+./run.sh                     # open http://localhost:8118</pre>
       </div>
+      <p class="muted small">In a Podman container instead: replace the last two lines with
+        <code>ubuntu/build-run.sh adduser yourname</code> and <code>ubuntu/build-run.sh all</code>.
+        Your data lives in <code>~/containers/volumes/personal-financial-dashboard/data</code>.</p>
+      <p class="muted small">Optional: point <code>OLLAMA_URL</code> and <code>OLLAMA_MODEL</code> in <code>.env</code>
+        at a model on your own network for plain-English explanations of the advice.</p>
     </section>
   </main>
 </body>
