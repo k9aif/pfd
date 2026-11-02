@@ -22,35 +22,42 @@ $1.82M reaching $2.46M at 5% real with $11,300/month takes about 3 years, not 7.
 
 ## Run
 
+Locally (Mac):
+
 ```bash
-./run.sh            # builds the image, (re)starts the container
-open http://127.0.0.1:8095
+cp .env.example .env     # once; mode 600, gitignored
+./run.sh                 # http://localhost:8118, data in ./data
+./run.sh test            # calculation tests
 ```
 
-`run.sh` creates `.env` from `.env.example` on first run (mode 600, gitignored).
+On the Podman host (Ubuntu), like the other apps:
+
+```bash
+ubuntu/build-run.sh all       # git pull + build + start
+ubuntu/build-run.sh logs | stop | backups
+```
+
+The container binds to `127.0.0.1:8118` only. From the Mac: `ssh -L 8118:localhost:8118 <podman-host>`
+and open http://localhost:8118. `PFD_BIND=0.0.0.0` in `.env` opens it to the LAN (there is no
+login). Never put it behind the Cloudflare tunnel.
 
 | Setting | Meaning |
 |---|---|
-| `PFD_PORT` | Host port (default 8095) |
+| `PFD_PORT` | Port for `./run.sh` (default 8118) |
+| `PFD_BIND` | Container bind address (default 127.0.0.1) |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | Optional local model that explains the advice in plain English. Blank = off |
 | `OLLAMA_TIMEOUT` | Seconds to wait for the model (default 180) |
 
-Bookmark `http://127.0.0.1:8095/#advise` to open straight into the advice panel.
+Bookmark `http://localhost:8118/#advise` to open straight into the advice panel.
 
 ## Your data
 
-- Saved automatically to `/data/state.json` in the `pfd-data` volume. Rebuilding or
-  removing the container keeps it.
-- One backup per day in `/data/backups/`, last 60 kept.
+- Saved automatically to `state.json`: `./data/` locally,
+  `~/containers/volumes/personal-financial-dashboard/data/` on the Podman host (mode 700).
+  Rebuilding the container keeps it.
+- One backup per day in `backups/`, last 60 kept. Restore by copying one over `state.json`.
 - **Export JSON** / **Import JSON** in the header for your own encrypted copy.
-- The server never logs request bodies.
-
-Restore a backup:
-
-```bash
-podman exec personal_financial_dashboard ls /data/backups
-podman exec personal_financial_dashboard cp /data/backups/state-2026-11-02.json /data/state.json
-```
+- The server never logs request bodies. `/healthz` shows the deployed commit and build date.
 
 ## What the Advise button does
 
@@ -85,7 +92,8 @@ static/finance.js    all calculations (pure, tested)
 static/advice.js     tier strategies, recommendation, personal flags
 static/app.js        UI
 static/charts.js     inline SVG charts
-Containerfile, run.sh
+run.sh               local run + tests
+ubuntu/              Containerfile + build-run.sh for the Podman host
 ```
 
 ## Roadmap

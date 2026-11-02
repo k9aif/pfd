@@ -31,6 +31,7 @@ MAX_BODY = 2 * 1024 * 1024
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "").rstrip("/")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "")
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "180"))
+BUILD = {"commit": os.environ.get("PFD_COMMIT", "dev"), "built": os.environ.get("PFD_BUILT", "dev")}
 
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -82,7 +83,9 @@ def write_state(payload: dict) -> None:
         Path(tmp).unlink(missing_ok=True)
         raise
     # One backup per day, overwritten through the day; oldest pruned.
-    (BACKUP_DIR / f"state-{date.today().isoformat()}.json").write_bytes(body)
+    backup = BACKUP_DIR / f"state-{date.today().isoformat()}.json"
+    backup.write_bytes(body)
+    backup.chmod(0o600)
     for old in sorted(BACKUP_DIR.glob("state-*.json"))[:-BACKUPS_KEPT]:
         old.unlink()
 
@@ -144,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             self.send_bytes(HTTPStatus.OK, render_index(), CONTENT_TYPES[".html"], "no-store")
         elif path == "/healthz":
-            self.send_json(HTTPStatus.OK, {"ok": True})
+            self.send_json(HTTPStatus.OK, {"ok": True, **BUILD})
         elif path == "/api/config":
             self.send_json(HTTPStatus.OK, {"llm": bool(OLLAMA_URL and OLLAMA_MODEL), "model": OLLAMA_MODEL})
         elif path == "/api/state":
@@ -213,7 +216,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     host = os.environ.get("HOST", "127.0.0.1")
-    port = int(os.environ.get("PORT", "8095"))
+    port = int(os.environ.get("PORT", "8118"))
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((host, port), Handler)
     print(f"Personal Financial Dashboard on http://{host}:{port} (data: {DATA_DIR})", flush=True)
