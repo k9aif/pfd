@@ -172,7 +172,7 @@ function renderOutputs() {
   applied = applyHoldings(state);
   view = current === me.household ? combineHousehold(applied, members().map(applyHoldings)) : applied;
   const m = summary(view);
-  $('sample-banner').hidden = !state.isSample;
+  $('sample-banner').hidden = !state.isSample && !me.publicDemo;
   renderHouseholdNote();
   $('saved-line').textContent = fmtMoney(m.monthly * (period === 'annual' ? 12 : 1));
   renderKpis(m);
@@ -667,6 +667,11 @@ async function load() {
   }
   $('who').textContent = displayName(me.user);
   if (me.demo) $('who').textContent = 'Demo mode';
+  if (me.publicDemo) {
+    const repo = me.repoUrl ? ` <a href="${escapeAttr(me.repoUrl.replace(/\.git$/, ''))}" rel="noopener">Run your own private copy</a>.` : '';
+    $('sample-banner').innerHTML = '<b>Public demo.</b> Play with the sample numbers freely: your changes are private to this visit '
+      + `and are thrown away when you sign out or after 2 idle hours. Please do not enter real numbers.${repo}`;
+  }
   $('log-month').value = new Date().toISOString().slice(0, 7);
   let saved = '';
   try { saved = localStorage.getItem('pfd-dashboard') || ''; } catch { /* storage blocked */ }

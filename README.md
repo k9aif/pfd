@@ -123,6 +123,18 @@ On macOS it uses the rootless Podman machine (starting it if needed). The contai
 | `PFD_BIND` | Container bind address. `127.0.0.1` (default) is this computer only; `0.0.0.0` opens it to your network with no extra protection |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | Optional local model for the plain-English explanation. `http://localhost:11434` works for both `./run.sh` and the container on macOS |
 | `PFD_REPO_URL` | Shown in the landing page's "Run your own" box |
+| `PFD_PUBLIC_DEMO`, `PFD_TRUST_PROXY` | Hosted demo mode, see [Hosting a public demo](#hosting-a-public-demo) |
+
+## Hosting a public demo
+
+To let people try it without installing anything, run one instance with `PFD_PUBLIC_DEMO=1`
+(and `PFD_TRUST_PROXY=1` behind Cloudflare or another HTTPS proxy):
+
+- Everyone signs in with `demo` / `demo`, and each visit gets its own private sandbox in memory.
+  Visitors never see each other's numbers, and nothing is written to disk.
+- Sandboxes are discarded on sign-out or after 2 idle hours (at most 500 at once).
+- The optional explanation follows `OLLAMA_URL` as usual, limited to 3 per visit and one at a time.
+- A banner asks visitors not to enter real numbers and links here to run a private copy.
 
 ## People and sign-in
 

@@ -196,3 +196,108 @@ class Http(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PublicDemo(unittest.TestCase):
+    """Hosted demo: demo/demo only, one private in-memory sandbox per sign-in, nothing on disk."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.saved = {k: getattr(server, k) for k in
+                     ("PUBLIC_DEMO", "TRUST_PROXY", "USERS", "DEMO", "DATA_DIR", "DASHBOARD_DIR", "BACKUP_DIR",
+                      "OLLAMA_URL", "OLLAMA_MODEL", "ask_ollama")}
+        cls.tmp = tempfile.TemporaryDirectory()
+        server.DATA_DIR = Path(cls.tmp.name)
+        server.DASHBOARD_DIR = server.DATA_DIR / "dashboards"
+        server.BACKUP_DIR = server.DATA_DIR / "backups"
+        server.PUBLIC_DEMO, server.TRUST_PROXY, server.DEMO = True, True, True
+        server.USERS = {"demo": server.hash_password("demo")}
+        server.OLLAMA_URL, server.OLLAMA_MODEL = "http://ollama.invalid", "test-model"
+        server.ask_ollama = lambda brief: "explained"
+        cls.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.port = cls.httpd.server_address[1]
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        for k, v in cls.saved.items():
+            setattr(server, k, v)
+        server._sessions.clear()
+        cls.tmp.cleanup()
+
+    def setUp(self):
+        server._failures.clear()
+
+    call = Http.call
+
+    def login(self, ip):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        conn.request("POST", "/api/login", json.dumps({"name": "demo", "password": "demo"}),
+                     {"Content-Type": "application/json", "X-PFD": "1", "CF-Connecting-IP": ip})
+        res = conn.getresponse()
+        res.read()
+        self.assertEqual(res.status, 200)
+        cookie = res.getheader("Set-Cookie")
+        self.assertIn("Secure", cookie)
+        return cookie.split(";", 1)[0].split("=", 1)[1]
+
+    def test_visitors_never_see_each_other(self):
+        a, b = self.login("203.0.113.1"), self.login("203.0.113.2")
+        res, _ = self.call("PUT", "/api/dashboards/demo", {"version": 1, "secret": "a"}, cookie=a)
+        self.assertEqual(res.status, 200)
+        _, docs_b = self.call("GET", "/api/dashboards", cookie=b)
+        self.assertIsNone(docs_b["demo"])
+        _, docs_a = self.call("GET", "/api/dashboards", cookie=a)
+        self.assertEqual(docs_a["demo"]["secret"], "a")
+        self.assertFalse(server.DASHBOARD_DIR.exists(), "public demo must not write to disk")
+
+    def test_sign_out_discards_the_sandbox(self):
+        a = self.login("203.0.113.3")
+        self.call("PUT", "/api/dashboards/demo", {"version": 1, "x": 1}, cookie=a)
+        self.call("POST", "/api/logout", cookie=a)
+        a2 = self.login("203.0.113.3")
+        _, docs = self.call("GET", "/api/dashboards", cookie=a2)
+        self.assertIsNone(docs["demo"])
+
+    def test_lockout_is_per_visitor_behind_the_proxy(self):
+        conn = lambda: http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        for _ in range(server.LOCK_AFTER_FAILURES):
+            c = conn()
+            c.request("POST", "/api/login", json.dumps({"name": "demo", "password": "x"}),
+                      {"Content-Type": "application/json", "X-PFD": "1", "CF-Connecting-IP": "198.51.100.9"})
+            c.getresponse().read()
+        c = conn()
+        c.request("POST", "/api/login", json.dumps({"name": "demo", "password": "demo"}),
+                  {"Content-Type": "application/json", "X-PFD": "1", "CF-Connecting-IP": "198.51.100.9"})
+        self.assertEqual(c.getresponse().status, 429)
+        self.login("198.51.100.10")  # someone else is unaffected
+
+    def test_explanations_are_capped_per_visit(self):
+        a = self.login("203.0.113.4")
+        for _ in range(server.DEMO_EXPLAINS_PER_SESSION):
+            res, body = self.call("POST", "/api/advise", {"brief": "x"}, cookie=a)
+            self.assertEqual(res.status, 200, body)
+        res, _ = self.call("POST", "/api/advise", {"brief": "x"}, cookie=a)
+        self.assertEqual(res.status, 429)
+
+    def test_explanations_one_at_a_time(self):
+        a = self.login("203.0.113.5")
+        self.assertTrue(server._llm_slot.acquire(blocking=False))
+        try:
+            res, body = self.call("POST", "/api/advise", {"brief": "x"}, cookie=a)
+            self.assertEqual(res.status, 429)
+            self.assertIn("Another explanation", body["error"])
+        finally:
+            server._llm_slot.release()
+
+    def test_sessions_are_bounded(self):
+        saved = server.MAX_DEMO_SESSIONS
+        server.MAX_DEMO_SESSIONS = 3
+        try:
+            server._sessions.clear()
+            tokens = [server.new_session("demo") for _ in range(5)]
+            self.assertEqual(len(server._sessions), 3)
+            self.assertNotIn(tokens[0], server._sessions)
+        finally:
+            server.MAX_DEMO_SESSIONS = saved

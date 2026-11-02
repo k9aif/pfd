@@ -7,6 +7,11 @@ async function showDemoHint() {
       $('demo-hint').hidden = false;
       $('name').value = 'demo';
     }
+    if (status.publicDemo) {
+      $('demo-hint').querySelector('span').textContent = 'Public demo with sample numbers. Your changes stay private to your '
+        + 'visit and are thrown away when you sign out or after 2 idle hours. Please do not enter real numbers: '
+        + 'run your own copy for that (below).';
+    }
   } catch {
     // The form still works; a real error will show when signing in.
   }

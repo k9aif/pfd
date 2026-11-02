@@ -50,6 +50,18 @@ LOCK_AFTER_FAILURES = 5
 LOCK_SECONDS = 60
 SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 
+# Public demo (e.g. a hosted "play with it" site): only demo/demo, every sign-in gets its own
+# throwaway dashboards in memory, and nothing is written to disk. The LLM explanation follows
+# .env as usual, limited per visitor and to one at a time so strangers cannot tie up the GPU.
+PUBLIC_DEMO = os.environ.get("PFD_PUBLIC_DEMO") == "1"
+DEMO_SESSION_IDLE_SECONDS = 2 * 3600
+MAX_DEMO_SESSIONS = 500
+DEMO_MAX_BODY = 256 * 1024
+DEMO_EXPLAINS_PER_SESSION = 3
+_llm_slot = threading.BoundedSemaphore(1)
+# Behind Cloudflare (or another proxy) every request comes from 127.0.0.1; trust its client-IP header.
+TRUST_PROXY = os.environ.get("PFD_TRUST_PROXY") == "1"
+
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "").rstrip("/")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "")
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "180"))
@@ -65,9 +77,10 @@ CONTENT_TYPES = {
 }
 
 ADVICE_PROMPT = """You are explaining a personal FIRE (financial independence) plan to its owner.
-Every number below was calculated by the dashboard. Do not invent new numbers or change them.
-In plain English and under 350 words:
-1. Say which risk tier fits and why, using the success rates and FIRE ages.
+The dashboard has already chosen the risk tier and calculated every number below.
+Rules: use only the numbers given, never change or invent one, and never pick a different tier.
+In plain English and under 300 words:
+1. Explain why the recommended tier ({recommended}) fits, using its success rate and FIRE age compared with the other tiers.
 2. Explain the two or three most important flags and what to do about each.
 3. Name one thing to discuss with a licensed financial advisor or CPA.
 Do not recommend specific funds or tickers. This is educational, not financial advice.
@@ -179,11 +192,28 @@ _sessions: dict[str, dict] = {}
 _failures: dict[str, dict] = {}
 
 
+def session_idle_seconds() -> int:
+    return DEMO_SESSION_IDLE_SECONDS if PUBLIC_DEMO else SESSION_IDLE_SECONDS
+
+
 def new_session(user: str) -> str:
     token = secrets.token_urlsafe(32)
     with _lock:
-        _sessions[token] = {"user": user, "seen": time.time()}
+        if PUBLIC_DEMO:
+            now = time.time()
+            for t in [t for t, s in _sessions.items() if now - s["seen"] > DEMO_SESSION_IDLE_SECONDS]:
+                del _sessions[t]
+            # Bounded memory: the least recently used sandbox goes first.
+            while len(_sessions) >= MAX_DEMO_SESSIONS:
+                del _sessions[min(_sessions, key=lambda t: _sessions[t]["seen"])]
+        _sessions[token] = {"user": user, "seen": time.time(), "docs": {}}
     return token
+
+
+def sandbox(token: str | None) -> dict:
+    """The calling session's own dashboards (public demo only)."""
+    with _lock:
+        return _sessions[token]["docs"]
 
 
 def session_user(token: str | None) -> str | None:
@@ -193,7 +223,7 @@ def session_user(token: str | None) -> str | None:
         s = _sessions.get(token)
         if not s:
             return None
-        if time.time() - s["seen"] > SESSION_IDLE_SECONDS or s["user"] not in USERS:
+        if time.time() - s["seen"] > session_idle_seconds() or s["user"] not in USERS:
             _sessions.pop(token, None)
             return None
         s["seen"] = time.time()
@@ -248,21 +278,31 @@ class Conflict(Exception):
     pass
 
 
+def next_meta(current: dict | None, payload: dict, user: str) -> dict:
+    current_meta = (current or {}).get("_meta") or {}
+    current_version = current_meta.get("version", 0)
+    sent_version = (payload.get("_meta") or {}).get("version", 0)
+    # Someone else saved since this browser loaded the dashboard: refuse rather than overwrite.
+    if current is not None and sent_version != current_version:
+        raise Conflict(f"Changed by {current_meta.get('updatedBy', 'someone')} at "
+                       f"{current_meta.get('updatedAt', 'an earlier time')}. Reload to see their version.")
+    return {
+        "version": current_version + 1,
+        "updatedBy": user,
+        "updatedAt": datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M"),
+    }
+
+
+def write_sandbox(docs: dict, dashboard_id: str, payload: dict, user: str) -> dict:
+    with _write_lock:
+        meta = next_meta(docs.get(dashboard_id), payload, user)
+        docs[dashboard_id] = {**payload, "_meta": meta}
+        return meta
+
+
 def write_dashboard(dashboard_id: str, payload: dict, user: str) -> dict:
     with _write_lock:
-        current = read_dashboard(dashboard_id)
-        current_meta = (current or {}).get("_meta") or {}
-        current_version = current_meta.get("version", 0)
-        sent_version = (payload.get("_meta") or {}).get("version", 0)
-        # Someone else saved since this browser loaded the dashboard: refuse rather than overwrite.
-        if current is not None and sent_version != current_version:
-            raise Conflict(f"Changed by {current_meta.get('updatedBy', 'someone')} at "
-                           f"{current_meta.get('updatedAt', 'an earlier time')}. Reload to see their version.")
-        meta = {
-            "version": current_version + 1,
-            "updatedBy": user,
-            "updatedAt": datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M"),
-        }
+        meta = next_meta(read_dashboard(dashboard_id), payload, user)
         payload = {**payload, "_meta": meta}
         body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
         _atomic_write(dashboard_path(dashboard_id), body)
@@ -319,12 +359,17 @@ def render_page(name: str) -> bytes:
     return html.encode("utf-8")
 
 
+def recommended_tier(brief: str) -> str:
+    m = re.search(r"Recommended tier by rule: ([^.\n]+)", brief)
+    return m.group(1).strip() if m else "stated below"
+
+
 def ask_ollama(brief: str) -> str:
     request = urllib.request.Request(
         f"{OLLAMA_URL}/api/generate",
         data=json.dumps({
             "model": OLLAMA_MODEL,
-            "prompt": ADVICE_PROMPT.format(brief=brief),
+            "prompt": ADVICE_PROMPT.format(brief=brief, recommended=recommended_tier(brief)),
             "stream": False,
             "options": {"temperature": 0.2},
         }).encode("utf-8"),
@@ -360,6 +405,17 @@ class Handler(BaseHTTPRequestHandler):
     def user(self) -> str | None:
         return session_user(self.cookie(SESSION_COOKIE))
 
+    def client_ip(self) -> str:
+        if TRUST_PROXY:
+            forwarded = self.headers.get("CF-Connecting-IP") or (self.headers.get("X-Forwarded-For") or "").split(",")[0]
+            if forwarded.strip():
+                return forwarded.strip()
+        return self.client_address[0]
+
+    def session_cookie(self, token: str, max_age: int) -> str:
+        secure = "; Secure" if TRUST_PROXY else ""
+        return f"{SESSION_COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{secure}"
+
     def send_bytes(self, status: int, body: bytes, content_type: str, cache: str = "no-store",
                    extra: dict | None = None) -> None:
         self.send_response(status)
@@ -389,9 +445,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def read_json(self):
+        limit = DEMO_MAX_BODY if PUBLIC_DEMO else MAX_BODY
         length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0 or length > MAX_BODY:
-            raise ValueError(f"body must be between 1 and {MAX_BODY} bytes")
+        if length <= 0 or length > limit:
+            raise ValueError(f"body must be between 1 and {limit} bytes")
         return json.loads(self.rfile.read(length))
 
     def same_origin_write(self) -> bool:
@@ -417,7 +474,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/healthz":
             self.send_json(HTTPStatus.OK, {"ok": True, **BUILD})
         elif path == "/api/status":
-            self.send_json(HTTPStatus.OK, {"usersConfigured": not DEMO, "demo": DEMO, "maxUsers": MAX_USERS})
+            self.send_json(HTTPStatus.OK, {"usersConfigured": not DEMO, "demo": DEMO, "publicDemo": PUBLIC_DEMO,
+                                           "maxUsers": MAX_USERS})
         elif path.startswith("/static/"):
             self.serve_static(path.removeprefix("/static/"))
         elif not path.startswith("/api/"):
@@ -427,10 +485,15 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/me":
             self.send_json(HTTPStatus.OK, {
                 "user": user, "users": list(USERS), "dashboards": dashboard_ids(), "household": HOUSEHOLD,
-                "llm": bool(OLLAMA_URL and OLLAMA_MODEL), "model": OLLAMA_MODEL, "demo": DEMO, **BUILD,
+                "llm": bool(OLLAMA_URL and OLLAMA_MODEL), "model": OLLAMA_MODEL,
+                "demo": DEMO, "publicDemo": PUBLIC_DEMO, "repoUrl": REPO_URL, **BUILD,
             })
         elif path == "/api/dashboards":
-            self.send_json(HTTPStatus.OK, {d: read_dashboard(d) for d in dashboard_ids()})
+            if PUBLIC_DEMO:
+                docs = sandbox(self.cookie(SESSION_COOKIE))
+                self.send_json(HTTPStatus.OK, {d: docs.get(d) for d in dashboard_ids()})
+            else:
+                self.send_json(HTTPStatus.OK, {d: read_dashboard(d) for d in dashboard_ids()})
         else:
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
@@ -465,8 +528,7 @@ class Handler(BaseHTTPRequestHandler):
             self.login()
         elif self.path == "/api/logout":
             end_session(self.cookie(SESSION_COOKIE))
-            self.send_json(HTTPStatus.OK, {"ok": True},
-                           {"Set-Cookie": f"{SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"})
+            self.send_json(HTTPStatus.OK, {"ok": True}, {"Set-Cookie": self.session_cookie("", 0)})
         elif self.path == "/api/advise":
             if self.user():
                 self.advise()
@@ -476,7 +538,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def login(self) -> None:
-        ip = self.client_address[0]
+        ip = self.client_ip()
         wait = locked_for(ip)
         if wait:
             self.send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": f"Too many attempts. Try again in {int(wait) + 1} seconds."})
@@ -496,21 +558,37 @@ class Handler(BaseHTTPRequestHandler):
             return
         clear_failures(ip)
         token = new_session(name)
-        self.send_json(HTTPStatus.OK, {"user": name}, {
-            "Set-Cookie": f"{SESSION_COOKIE}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_IDLE_SECONDS}",
-        })
+        self.send_json(HTTPStatus.OK, {"user": name}, {"Set-Cookie": self.session_cookie(token, session_idle_seconds())})
 
     def advise(self) -> None:
         if not (OLLAMA_URL and OLLAMA_MODEL):
             self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "OLLAMA_URL and OLLAMA_MODEL are not set in .env"})
             return
+        if PUBLIC_DEMO:
+            with _lock:
+                session = _sessions.get(self.cookie(SESSION_COOKIE) or "", {})
+                used = session.get("explains", 0)
+                if used >= DEMO_EXPLAINS_PER_SESSION:
+                    self.send_json(HTTPStatus.TOO_MANY_REQUESTS,
+                                   {"error": f"The demo allows {DEMO_EXPLAINS_PER_SESSION} explanations per visit."})
+                    return
+        if not _llm_slot.acquire(blocking=PUBLIC_DEMO is False):
+            self.send_json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "Another explanation is running. Try again in a moment."})
+            return
         try:
             brief = str(self.read_json().get("brief", ""))[:20000]
-            self.send_json(HTTPStatus.OK, {"text": ask_ollama(brief), "model": OLLAMA_MODEL})
+            text = ask_ollama(brief)
+            if PUBLIC_DEMO:
+                with _lock:
+                    if (session := _sessions.get(self.cookie(SESSION_COOKIE) or "")) is not None:
+                        session["explains"] = session.get("explains", 0) + 1
+            self.send_json(HTTPStatus.OK, {"text": text, "model": OLLAMA_MODEL})
         except (ValueError, json.JSONDecodeError) as exc:
             self.send_json(HTTPStatus.BAD_GATEWAY, {"error": str(exc)})
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             self.send_json(HTTPStatus.BAD_GATEWAY, {"error": f"could not reach Ollama at {OLLAMA_URL}: {exc}"})
+        finally:
+            _llm_slot.release()
 
     def do_PUT(self) -> None:
         if not self.same_origin_write():
@@ -532,7 +610,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
         try:
-            meta = write_dashboard(m.group(1), payload, user)
+            if PUBLIC_DEMO:
+                meta = write_sandbox(sandbox(self.cookie(SESSION_COOKIE)), m.group(1), payload, user)
+            else:
+                meta = write_dashboard(m.group(1), payload, user)
         except Conflict as exc:
             self.send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
             return
@@ -562,14 +643,23 @@ def cli(args: list[str]) -> None:
 
 def main() -> None:
     global USERS, DEMO
-    USERS, DEMO = load_users(os.environ)
+    if PUBLIC_DEMO:
+        # Real users in .env are ignored: the public demo only ever has demo/demo.
+        USERS, DEMO = {DEMO_USER: hash_password(DEMO_USER)}, True
+    else:
+        USERS, DEMO = load_users(os.environ)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        migrate_single_state()
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8118"))
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    migrate_single_state()
     server = ThreadingHTTPServer((host, port), Handler)
-    who = "demo mode (demo/demo); add yourself with ./run.sh adduser <name>" if DEMO else ", ".join(USERS)
-    print(f"Personal Financial Dashboard on http://{host}:{port} (users: {who}; data: {DATA_DIR})", flush=True)
+    if PUBLIC_DEMO:
+        where = "PUBLIC DEMO: demo/demo, per-session sandboxes in memory, nothing written to disk"
+    elif DEMO:
+        where = f"users: demo mode (demo/demo); add yourself with ./run.sh adduser <name>; data: {DATA_DIR}"
+    else:
+        where = f"users: {', '.join(USERS)}; data: {DATA_DIR}"
+    print(f"Personal Financial Dashboard on http://{host}:{port} ({where})", flush=True)
     server.serve_forever()
 
 
