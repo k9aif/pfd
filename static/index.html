@@ -65,11 +65,16 @@
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
           <label class="small" style="display:flex;gap:6px;align-items:center">
             <input type="checkbox" id="holdings-use"> Use holdings for account totals and allocation</label>
+          <button type="button" id="holding-import" title="Positions CSV downloaded from your brokerage">Import CSV</button>
+          <input id="holding-file" type="file" accept=".csv,text/csv,.xls,.xlsx" hidden>
           <button type="button" id="holding-add" class="primary">Add holding</button>
         </div>
       </div>
+      <div id="import-panel" class="import-panel" hidden></div>
       <div class="table-wrap"><table id="holdings" class="holdings"></table></div>
       <p class="small" id="holdings-totals"></p>
+      <p class="muted small">Import CSV: download "positions" from your brokerage (E*TRADE, Fidelity, Schwab, Vanguard and others) and pick
+        the file. It is read in this browser and only the holdings it produces are saved.</p>
       <p class="muted small">Optional. As you invest, raise the shares or add a row per purchase; update prices once a month,
         then press Update month. Shares × price gives the value, or type a value for accounts like a 401(k).
         Cost basis on every taxable row replaces the assumed gain share.</p>

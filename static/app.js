@@ -5,6 +5,7 @@ import {
 } from './finance.js';
 import { SUCCESS_GOAL, adviceBrief, evaluateTiers, personalFlags } from './advice.js';
 import { donut, lineChart, progressRing } from './charts.js';
+import { ROLES, importPositions } from './importer.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -595,7 +596,9 @@ function renderHoldings() {
           <td>${num(i, 'basis', r.basis, 100)}</td>
           <td class="num" id="hg-${i}">${gainText(r)}</td>
           <td><button type="button" class="link" data-del-row="${i}" aria-label="Remove row">✕</button></td></tr>`;
-      }).join('')}</tbody>`;
+      }).join('')}</tbody>
+      <tfoot><tr class="total"><td colspan="5" id="h-total-label"></td><td class="num" id="h-total"></td>
+        <td class="num" id="h-basis"></td><td class="num" id="h-gain"></td><td></td></tr></tfoot>`;
   }
   renderHoldingTotals();
 }
@@ -607,7 +610,19 @@ function gainText(r) {
 }
 
 function renderHoldingTotals() {
-  const { byAccount, total } = holdingTotals(state.holdings.rows);
+  const rows = state.holdings.rows;
+  const { byAccount, total } = holdingTotals(rows);
+  if ($('h-total')) {
+    const withBasis = rows.filter((r) => Number(r.basis) > 0);
+    const basis = withBasis.reduce((a, r) => a + Number(r.basis), 0);
+    const gain = withBasis.reduce((a, r) => a + holdingValue(r) - Number(r.basis), 0);
+    const asOf = state.holdings.pricesAsOf;
+    $('h-total-label').innerHTML = `<b>Total holdings value</b> · ${rows.length} ${rows.length === 1 ? 'holding' : 'holdings'}`
+      + (asOf ? ` · prices as of ${asOf}` : '');
+    $('h-total').innerHTML = `<b>${fmtMoney(total)}</b>`;
+    $('h-basis').textContent = withBasis.length ? fmtMoney(basis) : '—';
+    $('h-gain').innerHTML = withBasis.length ? `<span class="${gain >= 0 ? 'up' : 'down'}">${fmtMoney(gain)}</span>` : '—';
+  }
   $('holdings-totals').innerHTML = state.holdings.rows.length
     ? `${HOLDING_ACCOUNTS.filter((a) => byAccount[a.key]).map((a) => `${a.label} <b>${fmtMoney(byAccount[a.key])}</b>`).join(' · ')}`
       + ` · Total <b>${fmtMoney(total)}</b>${state.holdings.use ? '' : ' <span class="muted">(not used: switch on to replace the typed totals)</span>'}`
@@ -642,6 +657,7 @@ function onHoldingInput(e) {
     const n = Number(el.value);
     if (!Number.isFinite(n) || n < 0) return;
     row[field] = n;
+    if (field !== 'basis') state.holdings.pricesAsOf = today();
   }
   // Switching between shares x price and a typed value changes the row's cells.
   const computedBefore = $(`hv-${i}`) !== null;
@@ -654,6 +670,108 @@ function onHoldingInput(e) {
   if ($(`hg-${i}`)) $(`hg-${i}`).innerHTML = gainText(row);
   renderHoldingTotals();
   holdingsChanged();
+}
+
+const today = () => new Date().toLocaleDateString('en-CA');
+
+// ---- CSV import ---------------------------------------------------------------
+// The file is read and parsed here in the browser; only the holdings it produces are saved.
+
+const ROLE_LABELS = {
+  symbol: 'Symbol', name: 'Name / description', shares: 'Shares', price: 'Price', value: 'Value',
+  basis: 'Cost basis (total)', unitCost: 'Cost per share', account: 'Account name',
+};
+let pending = null;
+
+async function startImport(file) {
+  pending = { fileName: file.name, text: await file.text(), mapping: null, account: 'taxable' };
+  if (/\.xlsx?$/i.test(file.name)) {
+    showImportError('This is an Excel file. In Excel choose File > Save As > CSV, then import the CSV.');
+    return;
+  }
+  runImport();
+}
+
+function runImport() {
+  try {
+    pending.result = importPositions(pending.text, {
+      account: pending.account, companyTicker: state.executive.ticker, mapping: pending.mapping || undefined,
+    });
+    pending.mapping = pending.result.mapping;
+    renderImportPanel();
+  } catch (err) {
+    showImportError(err.message);
+  }
+}
+
+function showImportError(message) {
+  $('import-panel').hidden = false;
+  $('import-panel').innerHTML = `<p class="error-text"><b>Could not import ${escapeHtml(pending?.fileName || 'the file')}.</b> ${escapeHtml(message)}</p>
+    <button type="button" data-import="cancel">Close</button>`;
+}
+
+function renderImportPanel() {
+  const { result } = pending;
+  const header = result.rows[result.header];
+  const total = result.holdings.reduce((a, h) => a + holdingValue(h), 0);
+  const unknown = result.holdings.filter((h) => h.unknownClass).length;
+  const colOpts = (sel) => `<option value="-1">—</option>` + header.map((h, i) =>
+    `<option value="${i}" ${i === sel ? 'selected' : ''}>${escapeHtml(h || `column ${i + 1}`)}</option>`).join('');
+  const accountName = (k) => HOLDING_ACCOUNTS.find((a) => a.key === k)?.label ?? k;
+  const classLabel = (k) => ASSET_CLASSES.find((c) => c.key === k)?.label ?? k;
+  $('import-panel').hidden = false;
+  $('import-panel').innerHTML = `
+    <div class="import-head">
+      <div><b>${escapeHtml(pending.fileName)}</b>: ${result.holdings.length} holdings worth <b>${fmtMoney(total)}</b>
+        <span class="muted">(table starts on row ${result.header + 1}${result.skipped.length ? `; skipped ${result.skipped.length}: ${escapeHtml(result.skipped.map((x) => x.text).slice(0, 4).join(', '))}${result.skipped.length > 4 ? '…' : ''}` : ''})</span></div>
+      <label class="small">Account for rows that don't name one
+        <select data-import="account">${HOLDING_ACCOUNTS.map((a) => `<option value="${a.key}" ${a.key === pending.account ? 'selected' : ''}>${a.label}</option>`).join('')}</select></label>
+    </div>
+    <details class="small"><summary>Columns used (change if something looks wrong)</summary>
+      <div class="mapping">${ROLES.map((r) => `<label>${ROLE_LABELS[r]}<select data-map="${r}">${colOpts(pending.mapping[r])}</select></label>`).join('')}</div>
+    </details>
+    ${unknown ? `<p class="small warn-text">${unknown} ${unknown === 1 ? 'holding is' : 'holdings are'} not a fund the dashboard recognises and will be counted as US stocks. Change the asset class after importing if needed.</p>` : ''}
+    <div class="table-wrap"><table class="preview"><thead><tr><th>Account</th><th>Name</th><th>Class</th><th>Shares</th><th>Price</th><th>Value</th><th>Cost basis</th></tr></thead>
+      <tbody>${result.holdings.slice(0, 12).map((h) => `<tr><td>${accountName(h.account)}</td><td>${escapeHtml(h.name)}</td>
+        <td>${classLabel(h.assetClass)}${h.unknownClass ? ' <span class="warn-text">?</span>' : ''}</td>
+        <td class="num">${h.shares || ''}</td><td class="num">${h.price ? fmtMoney(h.price) : ''}</td>
+        <td class="num">${fmtMoney(holdingValue(h))}</td><td class="num">${h.basis ? fmtMoney(h.basis) : '—'}</td></tr>`).join('')}
+        ${result.holdings.length > 12 ? `<tr><td colspan="7" class="note">…and ${result.holdings.length - 12} more</td></tr>` : ''}</tbody></table></div>
+    <div class="import-actions">
+      <button type="button" class="primary" data-import="add" ${result.holdings.length ? '' : 'disabled'}>Add to holdings</button>
+      <button type="button" data-import="replace" ${result.holdings.length ? '' : 'disabled'}
+        title="Removes the current rows in the accounts this file covers, then adds these">Replace rows in these accounts</button>
+      <button type="button" class="link" data-import="cancel">Cancel</button>
+    </div>`;
+}
+
+function finishImport(mode) {
+  const incoming = pending.result.holdings.map(({ unknownClass, ...h }) => h);
+  const accounts = new Set(incoming.map((h) => h.account));
+  if (mode === 'replace') state.holdings.rows = state.holdings.rows.filter((h) => !accounts.has(h.account));
+  state.holdings.rows.push(...incoming);
+  state.holdings.use = true;
+  state.holdings.pricesAsOf = today();
+  closeImport();
+  renderHoldings();
+  holdingsChanged();
+  setStatus(`Imported ${incoming.length} holdings from ${pending.fileName}`);
+  pending = null;
+}
+
+function closeImport() {
+  $('import-panel').hidden = true;
+  $('import-panel').innerHTML = '';
+}
+
+function onImportPanel(e) {
+  const action = e.target.dataset.import;
+  const role = e.target.dataset.map;
+  if (e.type === 'click' && action === 'add') finishImport('add');
+  else if (e.type === 'click' && action === 'replace') finishImport('replace');
+  else if (e.type === 'click' && action === 'cancel') { closeImport(); pending = null; }
+  else if (e.type === 'change' && action === 'account') { pending.account = e.target.value; runImport(); }
+  else if (e.type === 'change' && role) { pending.mapping = { ...pending.mapping, [role]: Number(e.target.value) }; runImport(); }
 }
 
 // ---- Persistence ------------------------------------------------------------
@@ -883,6 +1001,13 @@ document.addEventListener('DOMContentLoaded', () => {
     renderHoldings();
     holdingsChanged();
   });
+  $('holding-import').addEventListener('click', () => $('holding-file').click());
+  $('holding-file').addEventListener('change', (e) => {
+    if (e.target.files[0]) startImport(e.target.files[0]);
+    e.target.value = '';
+  });
+  $('import-panel').addEventListener('click', onImportPanel);
+  $('import-panel').addEventListener('change', onImportPanel);
   $('holding-add').addEventListener('click', () => {
     state.holdings.rows.push(newHolding());
     if (state.holdings.rows.length === 1) state.holdings.use = true;

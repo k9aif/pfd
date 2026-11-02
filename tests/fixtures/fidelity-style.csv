@@ -1,0 +1,9 @@
+Account Number,Account Name,Symbol,Description,Quantity,Last Price,Last Price Change,Current Value,Today's Gain/Loss Dollar,Today's Gain/Loss Percent,Total Gain/Loss Dollar,Total Gain/Loss Percent,Percent Of Account,Cost Basis Total,Average Cost Basis,Type
+X12345678,Individual,SPAXX**,HELD IN MONEY MARKET,,,,"$4,200.00",,,,,5.00%,,,Cash
+X12345678,Individual,FXAIX,FIDELITY 500 INDEX FUND,120.5,$190.00,+$1.20,"$22,895.00",+$144.60,+0.63%,"+$4,895.00",+27.19%,40.00%,"$18,000.00",$149.38,Cash
+Z87654321,ROTH IRA,VXUS,VANGUARD TOTAL INTL STOCK ETF,200,$65.00,-$0.20,"$13,000.00",-$40.00,-0.31%,"+$1,000.00",+8.33%,100.00%,"$12,000.00",$60.00,Cash
+Y55555555,Rollover IRA,BND,VANGUARD TOTAL BOND MARKET ETF,300,$72.00,$0.10,"$21,600.00",+$30.00,+0.14%,($600.00),-2.70%,100.00%,"$22,200.00",$74.00,Cash
+,,,,,,,,,,,,,,,
+
+"The data and information in this spreadsheet is provided to you solely for your use..."
+"Date downloaded Nov-02-2026 2:30 p.m ET"

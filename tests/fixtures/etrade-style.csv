@@ -1,0 +1,11 @@
+Account Summary
+Account,Net Account Value,Total Gain $,Total Gain %
+Individual Brokerage -1234,"$62,350.00","$9,100.00",17.09%
+
+View Summary - All Positions
+Symbol,Last Price $,Change $,Change %,Quantity,Price Paid $,Day's Gain $,Total Gain $,Total Gain %,Value $
+VTI,290.00,1.10,0.38,100,240.00,110.00,5000.00,20.83,29000.00
+AAPL,230.50,-2.00,-0.86,50,150.00,-100.00,4025.00,53.67,11525.00
+IBM,200.00,0.50,0.25,90,120.00,45.00,7200.00,66.67,18000.00
+CASH,,,,,,,,,3825.00
+TOTAL,,,,,,,,,62350.00
