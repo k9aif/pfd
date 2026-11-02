@@ -210,3 +210,42 @@ test('ticker guesses and value rules', () => {
   assert.equal(f.holdingValue({ shares: 2, price: 10, value: 999 }), 20);
   assert.equal(f.holdingValue({ shares: 0, price: 10, value: 999 }), 999);
 });
+
+test('target FIRE age before current age defaults to 65', () => {
+  const s = f.sampleState();
+  s.profile.age = 42; s.profile.targetAge = 30;
+  const a = f.sanitizeAges(s);
+  assert.equal(a.profile.targetAge, 65);
+  assert.match(a._ageNotes['profile.targetAge'], /65/);
+  assert.equal(s.profile.targetAge, 30, 'input is not mutated');
+});
+
+test('already past 65: the plan tests retiring now', () => {
+  const s = f.sampleState();
+  s.profile.age = 67; s.profile.targetAge = 50;
+  const a = f.sanitizeAges(s);
+  assert.equal(a.profile.targetAge, 67);
+  const m = f.summary(a);
+  assert.equal(m.target.healthcareBridgeYears, 0);
+  assert.equal(m.target.ssBridgeYears, 0);
+  const mc = f.monteCarlo(a, a.tiers.medium);
+  assert.ok(mc.successRate >= 0 && mc.successRate <= 1);
+});
+
+test('blank target and plan-to ages get defaults; valid ages pass through untouched', () => {
+  const s = f.sampleState();
+  s.profile.targetAge = ''; s.profile.planToAge = 40;
+  const a = f.sanitizeAges(s);
+  assert.equal(a.profile.targetAge, 65);
+  assert.equal(a.profile.planToAge, 95);
+  const ok = f.sampleState();
+  assert.equal(f.sanitizeAges(ok), ok);
+});
+
+test('Social Security start age is kept to 62-70', () => {
+  const s = f.sampleState();
+  s.retirement.ssStartAge = 75;
+  assert.equal(f.sanitizeAges(s).retirement.ssStartAge, 70);
+  s.retirement.ssStartAge = 55;
+  assert.equal(f.sanitizeAges(s).retirement.ssStartAge, 62);
+});

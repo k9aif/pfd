@@ -246,3 +246,4 @@ table.holdings input[type="number"] { text-align: right; min-width: 90px; }
 table.holdings input[data-field="name"] { min-width: 130px; }
 .field input:disabled, .alloc-row input:disabled { opacity: 0.75; border-style: dashed; }
 button.armed { border-color: var(--red); color: var(--red); font-weight: 600; }
+.field .hint.fix-note { color: var(--amber); font-weight: 600; }

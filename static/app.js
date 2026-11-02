@@ -1,6 +1,6 @@
 import {
   ASSET_CLASSES, HOLDING_ACCOUNTS, TIER_KEYS, applyHoldings, combineHousehold, fmtAge, fmtMoney, guessClass,
-  holdingTotals, holdingValue, holdingsActive, householdState, monthlySavings, netWorth, newHolding, pct,
+  holdingTotals, holdingValue, holdingsActive, householdState, monthlySavings, netWorth, newHolding, pct, sanitizeAges,
   planTier, projectBalances, sampleState, stressTests, summary, vestedAfterDrawdown, whatIf, withDefaults,
 } from './finance.js';
 import { SUCCESS_GOAL, adviceBrief, evaluateTiers, personalFlags } from './advice.js';
@@ -42,7 +42,7 @@ const INPUT_GROUPS = [
     title: 'You & investments',
     fields: [
       { path: 'profile.age', label: 'Current age', kind: 'age' },
-      { path: 'profile.targetAge', label: 'Target FIRE age', kind: 'age' },
+      { path: 'profile.targetAge', label: 'Target retirement age', kind: 'age', hint: "When you'd like to stop working; 65 if unsure" },
       { path: 'profile.planToAge', label: 'Plan to age', kind: 'age', hint: 'How long the money must last' },
       { path: 'accounts.taxable', label: 'Taxable brokerage', kind: 'money' },
       { path: 'accounts.preTax', label: 'Pre-tax retirement (401k, IRA)', kind: 'money' },
@@ -87,6 +87,9 @@ const INPUT_GROUPS = [
   },
 ];
 
+const AGE_PATHS = new Set(['profile.age', 'profile.targetAge', 'profile.planToAge', 'retirement.ssStartAge']);
+// Notes for ages just corrected, shown once on the next render of the form.
+let ageNotice = {};
 const get = (path, from = state) => path.split('.').reduce((o, k) => o?.[k], from);
 // The dashboard as the math sees it before household totals: typed numbers, or holdings when switched on.
 let applied = state;
@@ -118,7 +121,9 @@ function fieldHtml(f) {
         : f.kind === 'moneyPeriodic' && period === 'annual' ? v * 12 : v;
       const step = f.kind === 'fraction' ? f.step ?? 0.5 : f.kind === 'age' || f.kind === 'percent' ? 1 : 1000;
       const suffix = f.kind === 'moneyPeriodic' ? ` <span class="hint">${period === 'annual' ? 'per year' : 'per month'}</span>` : '';
-      const note = fromHoldings ? '<span class="hint">From holdings</span>' : '';
+      const fix = ageNotice[f.path] || applied._ageNotes?.[f.path];
+      const note = fromHoldings ? '<span class="hint">From holdings</span>'
+        : fix ? `<span class="hint fix-note">${escapeHtml(fix)}</span>` : '';
       const display = fromHoldings && f.kind === 'money' ? Math.round(shown) : shown;
       return `<div class="field"><label for="${id}">${f.label}${suffix}${hint}${note}</label>
         <input id="${id}" type="number" inputmode="decimal" step="${step}" min="0" value="${display}" data-path="${f.path}" data-kind="${f.kind}"${fromHoldings ? ' disabled' : ''}></div>`;
@@ -134,7 +139,7 @@ function escapeHtml(v) {
 }
 
 function renderInputs() {
-  applied = applyHoldings(state);
+  applied = applyHoldings(sanitizeAges(state));
   $('cashflow-form').innerHTML = `<fieldset>${CASHFLOW_FIELDS.map(fieldHtml).join('')}</fieldset>
     <div class="metric" style="margin-top:12px"><span>Saved ${period === 'annual' ? 'per year' : 'per month'}</span><b id="saved-line"></b></div>`;
   $('inputs').innerHTML = INPUT_GROUPS.map((g) =>
@@ -158,6 +163,19 @@ function onFieldInput(e) {
   set(path, value);
   state.isSample = false;
   if (path === 'plan.tier') sliders = null;
+  // Ages are corrected when you leave the field, not while typing ("6" on the way to "67").
+  if (e.type === 'change' && AGE_PATHS.has(path)) {
+    const fixed = sanitizeAges(state);
+    ageNotice = fixed._ageNotes || {};
+    if (fixed !== state) {
+      Object.assign(state.profile, { age: fixed.profile.age, targetAge: fixed.profile.targetAge, planToAge: fixed.profile.planToAge });
+      state.retirement.ssStartAge = fixed.retirement.ssStartAge;
+    }
+    const focusedId = document.activeElement?.id;
+    renderInputs();
+    if (focusedId) $(focusedId)?.focus();
+    ageNotice = {};
+  }
   renderOutputs();
   scheduleSave();
 }
@@ -169,8 +187,8 @@ function members() {
 }
 
 function renderOutputs() {
-  applied = applyHoldings(state);
-  view = current === me.household ? combineHousehold(applied, members().map(applyHoldings)) : applied;
+  applied = applyHoldings(sanitizeAges(state));
+  view = current === me.household ? combineHousehold(applied, members().map((m) => applyHoldings(sanitizeAges(m)))) : applied;
   const m = summary(view);
   $('sample-banner').hidden = !state.isSample && !me.publicDemo;
   renderHouseholdNote();
@@ -200,7 +218,11 @@ function renderKpis(m) {
     kpi('FIRE target', fmtMoney(m.target.total), `Classic 25×: ${fmtMoney(m.milestones.standard)}`),
     `<div class="card kpi"><div class="label">Progress to FIRE</div><div class="progress" style="display:flex;gap:12px;align-items:center;margin-top:4px"><span id="ring"></span><div><div class="value num">${pct(m.progress)}</div><div class="sub">${fmtMoney(m.gap)} to go</div></div></div></div>`,
     kpi('Years to FIRE', m.yearsToFire === null ? '—' : m.yearsToFire.toFixed(1),
-      m.fireAge === null ? 'Not reached by age ' + (view.profile.age + 60) : `At age ${fmtAge(m.fireAge)} (target ${view.profile.targetAge})`),
+      m.fireAge === null ? 'Not reached by age ' + (view.profile.age + 60)
+        // Reaching independence before the chosen age means the work after it is optional.
+        : m.fireAge < view.profile.targetAge - 0.05
+          ? `Free to stop at ${fmtAge(m.fireAge)} · working to ${view.profile.targetAge} by choice`
+          : `At age ${fmtAge(m.fireAge)} (target ${view.profile.targetAge})`),
     kpi('Savings rate', pct(m.savingsRate), `${fmtMoney(m.monthly)} a month`),
   ].join('');
   $('ring').append(progressRing(m.progress));

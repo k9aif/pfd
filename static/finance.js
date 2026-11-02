@@ -111,6 +111,57 @@ export function withDefaults(saved) {
 
 export const sum = (xs) => xs.reduce((a, b) => a + b, 0);
 
+// ---- Ages --------------------------------------------------------------------
+// The math needs current age <= target FIRE age < plan-to age. `sanitizeAges` returns the
+// state the math should use and a note per corrected field, so the form can say why.
+
+export const DEFAULT_FIRE_AGE = 65;
+export const MIN_AGE = 18;
+export const MAX_AGE = 100;
+export const SS_EARLIEST = 62;
+export const SS_LATEST = 70;
+
+export function sanitizeAges(s) {
+  const p = s.profile;
+  const notes = {};
+  const num = (v) => (v === '' || v === null || v === undefined ? NaN : Number(v));
+  let age = num(p.age);
+  if (!Number.isFinite(age)) age = 42;
+  const clampedAge = Math.min(MAX_AGE, Math.max(MIN_AGE, Math.round(age)));
+  if (clampedAge !== age) notes['profile.age'] = `Using ${clampedAge}: ages from ${MIN_AGE} to ${MAX_AGE}.`;
+  age = clampedAge;
+
+  let target = num(p.targetAge);
+  if (!Number.isFinite(target) || target < age) {
+    const fixed = age < DEFAULT_FIRE_AGE ? DEFAULT_FIRE_AGE : age;
+    notes['profile.targetAge'] = age < DEFAULT_FIRE_AGE
+      ? `Can't be before your current age; using ${DEFAULT_FIRE_AGE}.`
+      : `You're past ${DEFAULT_FIRE_AGE}, so the plan tests retiring now, at ${age}.`;
+    target = fixed;
+  }
+
+  let planTo = num(p.planToAge);
+  if (!Number.isFinite(planTo) || planTo <= target) {
+    const fixed = Math.max(95, age + 5, target + 5);
+    notes['profile.planToAge'] = `Must be after the target FIRE age; using ${fixed}.`;
+    planTo = fixed;
+  }
+
+  let ss = num(s.retirement.ssStartAge);
+  if (!Number.isFinite(ss) || ss < SS_EARLIEST || ss > SS_LATEST) {
+    const fixed = Number.isFinite(ss) ? Math.min(SS_LATEST, Math.max(SS_EARLIEST, ss)) : 67;
+    notes['retirement.ssStartAge'] = `Social Security can start between ${SS_EARLIEST} and ${SS_LATEST}; using ${fixed}.`;
+    ss = fixed;
+  }
+
+  if (!Object.keys(notes).length) return s;
+  const out = structuredClone(s);
+  out.profile = { ...p, age, targetAge: target, planToAge: planTo };
+  out.retirement = { ...s.retirement, ssStartAge: ss };
+  out._ageNotes = notes;
+  return out;
+}
+
 // ---- Holdings ----------------------------------------------------------------
 // Optional rows (one per lot) that, when switched on, replace the typed account
 // totals, the company stock line and the allocation percentages.
