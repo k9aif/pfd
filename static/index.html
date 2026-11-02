@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Personal Financial Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script type="module" src="/static/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Personal Financial Dashboard</h1>
+      <div class="muted small">How much is enough, and when do you get there</div>
+    </div>
+    <div class="actions">
+      <span id="save-status">Loading…</span>
+      <button id="export-btn" type="button">Export JSON</button>
+      <button id="import-btn" type="button">Import JSON</button>
+      <input id="import-file" type="file" accept="application/json" hidden>
+      <button id="advise-btn" class="primary" type="button">Advise</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="sample-banner" class="banner" hidden>
+      Showing sample numbers. Replace them with your own rounded totals below; your changes save automatically to this container's volume.
+    </div>
+
+    <section class="kpis" id="kpis"></section>
+
+    <section class="card">
+      <h2>FIRE milestones</h2>
+      <div class="ladder" id="ladder"></div>
+      <p class="muted small" id="ladder-note"></p>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h2 style="margin:0">Income, expenses &amp; savings</h2>
+          <div class="toggle" id="period-toggle">
+            <button type="button" data-period="monthly" class="on">Monthly</button>
+            <button type="button" data-period="annual">Annual</button>
+          </div>
+        </div>
+        <div id="cashflow-form"></div>
+      </div>
+      <div class="card">
+        <h2>Key FIRE metrics</h2>
+        <div class="metrics" id="metrics"></div>
+      </div>
+    </section>
+
+    <section class="grid-3" id="inputs"></section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2>Asset allocation</h2>
+        <div class="donut-row">
+          <div id="donut"></div>
+          <div id="alloc-table"></div>
+        </div>
+        <p class="muted small">Outer ring: your current mix. Inner ring: the target for your plan's risk tier.</p>
+      </div>
+      <div class="card">
+        <h2>Portfolio projections</h2>
+        <div id="projection"></div>
+        <div class="legend" id="projection-legend"></div>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2>What-if simulator</h2>
+        <div id="whatif"></div>
+      </div>
+      <div class="card">
+        <h2>Stress tests</h2>
+        <div class="table-wrap"><table id="stress"></table></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+        <h2 style="margin:0">Monthly net worth log</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="month" id="log-month" aria-label="Month to record">
+          <button type="button" id="log-update" class="primary">Update month</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table id="log"></table></div>
+      <p class="muted small">Records your current inputs for the chosen month. Market growth = change in net worth minus what you saved.</p>
+    </section>
+
+    <section class="card assumptions" id="assumptions"></section>
+  </main>
+
+  <div class="overlay" id="overlay"></div>
+  <aside class="drawer" id="drawer" aria-label="Investment advice" aria-hidden="true">
+    <header>
+      <div>
+        <h2 style="margin:0">Investment strategy</h2>
+        <div class="muted small">Low, medium and high risk, tested against your numbers</div>
+      </div>
+      <button type="button" id="drawer-close" aria-label="Close">Close</button>
+    </header>
+    <div class="body" id="advice"></div>
+  </aside>
+</body>
+</html>
