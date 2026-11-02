@@ -156,3 +156,21 @@ test('withDefaults keeps saved values and fills missing ones', () => {
 test('tier mixes add up to 100', () => {
   for (const k of f.TIER_KEYS) assert.equal(f.sum(Object.values(f.DEFAULT_TIERS[k].mix)), 100);
 });
+
+test('household adds members balances and flows, keeps its own assumptions', () => {
+  const h = f.householdState();
+  h.accounts.taxable = 100000;
+  h.property.homeValue = 500000;
+  h.cashflow.monthlyExpenses = 3000;
+  h.cashflow.retirementSpend = 120000;
+  const a = f.sampleState(); const b = f.sampleState();
+  b.accounts.taxable = 50000; b.cashflow.retirementSpend = 1;
+  const c = f.combineHousehold(h, [a, b]);
+  assert.equal(c.accounts.taxable, 100000 + a.accounts.taxable + 50000);
+  assert.equal(c.property.homeValue, 500000 + 2 * a.property.homeValue);
+  assert.equal(c.cashflow.monthlyExpenses, 3000 + 2 * a.cashflow.monthlyExpenses);
+  assert.equal(c.cashflow.retirementSpend, 120000);
+  assert.equal(h.accounts.taxable, 100000, 'input is not mutated');
+  h.household.combineMembers = false;
+  assert.equal(f.combineHousehold(h, [a, b]).accounts.taxable, 100000);
+});

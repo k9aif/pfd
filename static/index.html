@@ -13,19 +13,23 @@
       <h1>Personal Financial Dashboard</h1>
       <div class="muted small">How much is enough, and when do you get there</div>
     </div>
+    <nav class="tabs" id="tabs" aria-label="Dashboards"></nav>
     <div class="actions">
       <span id="save-status">Loading…</span>
       <button id="export-btn" type="button">Export JSON</button>
       <button id="import-btn" type="button">Import JSON</button>
       <input id="import-file" type="file" accept="application/json" hidden>
       <button id="advise-btn" class="primary" type="button">Advise</button>
+      <span class="muted small" id="who"></span>
+      <button id="signout-btn" type="button" class="link">Sign out</button>
     </div>
   </header>
 
   <main>
     <div id="sample-banner" class="banner" hidden>
-      Showing sample numbers. Replace them with your own rounded totals below; your changes save automatically to this container's volume.
+      Showing sample numbers. Replace them with your own rounded totals below; changes save automatically.
     </div>
+    <div id="household-note" class="banner" hidden></div>
 
     <section class="kpis" id="kpis"></section>
 

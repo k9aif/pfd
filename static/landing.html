@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Personal Financial Dashboard</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script type="module" src="/static/landing.js"></script>
+</head>
+<body class="landing">
+  <header class="top">
+    <div>
+      <h1>Personal Financial Dashboard</h1>
+      <div class="muted small">Runs on your own computer</div>
+    </div>
+    <div class="actions"><a class="btn primary" href="#signin">Sign in</a></div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h2>How much is enough, and when do you get there?</h2>
+      <p>Your freedom number, the years until you reach it, and the investment risk that gets you there,
+        worked out from your own numbers. Nothing leaves this machine.</p>
+      <a class="btn primary" href="#signin">Sign in</a>
+    </section>
+
+    <section class="grid-3 features">
+      <div class="card">
+        <h3>Your real FIRE number</h3>
+        <p>Retirement spend after tax, divided by a withdrawal rate suited to a long retirement, plus money set aside
+          for healthcare before 65 and the years before Social Security. Home equity stays out.</p>
+      </div>
+      <div class="card">
+        <h3>Advice tested on you</h3>
+        <p>Low, medium and high risk portfolios, each run through 2,000 simulated markets with your savings and spending.
+          You see the chance your money lasts, not a single hopeful line.</p>
+      </div>
+      <div class="card">
+        <h3>Stress tests</h3>
+        <p>A crash the year you retire, your company stock halving, a sabbatical, a lower withdrawal rate.
+          Each shows how far your date moves.</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li><b>Enter rounded totals.</b> Categories, not accounts: taxable, retirement, cash, the house, company stock.</li>
+        <li><b>Set your "enough".</b> What your chosen life costs per year, not what you spend today.</li>
+        <li><b>Press Advise.</b> See which risk level gets you there with the most margin, and what to fix first.</li>
+        <li><b>Update once a month.</b> Log the month, watch net worth and market growth, export a copy.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>Where your data goes</h2>
+      <div class="flow">
+        <div class="node"><b>Your browser</b><span>the dashboard and all charts</span></div>
+        <div class="arrow">→</div>
+        <div class="node"><b>This server</b><span>on this computer, signed-in users only</span></div>
+        <div class="arrow">→</div>
+        <div class="node"><b>Data folder</b><span>one file per dashboard, daily backups</span></div>
+      </div>
+      <p class="muted small">Optional: a local AI model on your own network explains the advice in plain English.
+        It receives a rounded summary only. No bank logins, no analytics, no outside scripts or fonts.</p>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2>What it is</h2>
+        <ul>
+          <li>A planning tool for up to three people, with a shared household view</li>
+          <li>Every formula shown in plain English with your numbers</li>
+          <li>Strategy-level guidance: asset mix, cash reserves, concentration, tax access</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2>What it is not</h2>
+        <ul>
+          <li>Connected to your accounts. It cannot see or move money</li>
+          <li>A stock picker. It never names funds or tickers</li>
+          <li>Financial, tax or legal advice. Take the numbers to a licensed advisor</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="card signin" id="signin">
+      <h2>Sign in</h2>
+      <form id="login-form" autocomplete="on">
+        <label for="name">Name</label>
+        <input id="name" name="username" autocomplete="username" autocapitalize="none" required>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <button type="submit" class="primary">Sign in</button>
+        <p id="login-error" class="error" role="alert" hidden></p>
+      </form>
+      <div id="setup" hidden>
+        <p><b>No one can sign in yet.</b> Whoever looks after this computer adds people (up to three) from a terminal:</p>
+        <pre>./run.sh adduser yourname</pre>
+        <p class="muted small">Then restart the dashboard. Passwords are stored as one-way hashes in the .env file.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

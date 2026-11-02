@@ -1,5 +1,5 @@
 import {
-  ASSET_CLASSES, TIER_KEYS, fireTarget, fmtAge, fmtMoney, monthlySavings, netWorth, pct,
+  ASSET_CLASSES, TIER_KEYS, combineHousehold, fmtAge, fmtMoney, householdState, monthlySavings, netWorth, pct,
   planTier, projectBalances, sampleState, stressTests, summary, vestedAfterDrawdown, whatIf, withDefaults,
 } from './finance.js';
 import { SUCCESS_GOAL, adviceBrief, evaluateTiers, personalFlags } from './advice.js';
@@ -13,8 +13,13 @@ const CLASS_COLORS = {
 };
 const TIER_COLORS = { low: 'var(--tier-low)', medium: 'var(--tier-medium)', high: 'var(--tier-high)' };
 
+// `state` is the dashboard being edited. `view` is what the numbers are computed from:
+// the same thing, except on the household dashboard where members' saved numbers are added.
 let state = sampleState();
-let config = { llm: false, model: '' };
+let view = state;
+let me = { user: '', users: [], dashboards: [], household: 'household', llm: false, model: '' };
+let docs = {};
+let current = '';
 let period = 'monthly';
 let sliders = null;
 
@@ -152,9 +157,15 @@ function onFieldInput(e) {
 
 // ---- Outputs ----------------------------------------------------------------
 
+function members() {
+  return me.users.map((u) => docs[u]).filter((d) => d && !d.isSample);
+}
+
 function renderOutputs() {
-  const m = summary(state);
+  view = current === me.household ? combineHousehold(state, members()) : state;
+  const m = summary(view);
   $('sample-banner').hidden = !state.isSample;
+  renderHouseholdNote();
   $('saved-line').textContent = fmtMoney(m.monthly * (period === 'annual' ? 12 : 1));
   renderKpis(m);
   renderLadder(m);
@@ -168,7 +179,7 @@ function renderOutputs() {
 }
 
 function renderKpis(m) {
-  const sorted = [...state.log].sort((a, b) => a.month.localeCompare(b.month));
+  const sorted = [...view.log].sort((a, b) => a.month.localeCompare(b.month));
   const last = sorted.at(-1);
   let nwSub = 'Log a month to track change';
   if (last && last.netWorth) {
@@ -181,7 +192,7 @@ function renderKpis(m) {
     kpi('FIRE target', fmtMoney(m.target.total), `Classic 25×: ${fmtMoney(m.milestones.standard)}`),
     `<div class="card kpi"><div class="label">Progress to FIRE</div><div class="progress" style="display:flex;gap:12px;align-items:center;margin-top:4px"><span id="ring"></span><div><div class="value num">${pct(m.progress)}</div><div class="sub">${fmtMoney(m.gap)} to go</div></div></div></div>`,
     kpi('Years to FIRE', m.yearsToFire === null ? '—' : m.yearsToFire.toFixed(1),
-      m.fireAge === null ? 'Not reached by age ' + (state.profile.age + 60) : `At age ${fmtAge(m.fireAge)} (target ${state.profile.targetAge})`),
+      m.fireAge === null ? 'Not reached by age ' + (view.profile.age + 60) : `At age ${fmtAge(m.fireAge)} (target ${view.profile.targetAge})`),
     kpi('Savings rate', pct(m.savingsRate), `${fmtMoney(m.monthly)} a month`),
   ].join('');
   $('ring').append(progressRing(m.progress));
@@ -228,17 +239,17 @@ function renderMetrics(m) {
 }
 
 function renderAllocation() {
-  const target = planTier(state).mix;
+  const target = planTier(view).mix;
   const slices = (src) => ASSET_CLASSES.map((c) => ({ value: Number(src[c.key]) || 0, color: CLASS_COLORS[c.key], label: c.label }));
   $('donut').replaceChildren(donut([
-    { radius: 80, width: 18, slices: slices(state.allocation) },
+    { radius: 80, width: 18, slices: slices(view.allocation) },
     { radius: 56, width: 14, slices: slices(target) },
   ]));
-  const total = ASSET_CLASSES.reduce((a, c) => a + (Number(state.allocation[c.key]) || 0), 0);
+  const total = ASSET_CLASSES.reduce((a, c) => a + (Number(view.allocation[c.key]) || 0), 0);
   const rows = ASSET_CLASSES.map((c) => `<div class="alloc-row">
       <i class="legend box" style="background:${CLASS_COLORS[c.key]};width:12px;height:12px;border-radius:3px"></i>
       <label for="a-${c.key}">${c.label}</label>
-      <input id="a-${c.key}" type="number" min="0" max="100" step="1" value="${state.allocation[c.key] ?? 0}" data-alloc="${c.key}">
+      <input id="a-${c.key}" type="number" min="0" max="100" step="1" value="${view.allocation[c.key] ?? 0}" data-alloc="${c.key}">
       <span class="tgt">${target[c.key]}%</span></div>`).join('');
   const existing = document.activeElement?.dataset?.alloc;
   if (existing) {
@@ -262,32 +273,32 @@ function onAllocInput(e) {
 }
 
 function renderProjection(m) {
-  const endAge = Math.max(60, state.profile.targetAge + 5);
-  const years = endAge - state.profile.age;
+  const endAge = Math.max(60, view.profile.targetAge + 5);
+  const years = endAge - view.profile.age;
   const series = TIER_KEYS.map((k) => ({
-    label: `${state.tiers[k].label} (${pct(state.tiers[k].realReturn, 1)} real)`,
+    label: `${view.tiers[k].label} (${pct(view.tiers[k].realReturn, 1)} real)`,
     color: TIER_COLORS[k],
-    values: projectBalances(m.investable, state.tiers[k].realReturn, m.monthly, years),
-    dash: k === state.plan.tier ? '' : '5 4',
+    values: projectBalances(m.investable, view.tiers[k].realReturn, m.monthly, years),
+    dash: k === view.plan.tier ? '' : '5 4',
   }));
-  $('projection').replaceChildren(lineChart({ series, xStart: state.profile.age, target: m.target.total, formatY: fmtMoney }));
+  $('projection').replaceChildren(lineChart({ series, xStart: view.profile.age, target: m.target.total, formatY: fmtMoney }));
   $('projection-legend').innerHTML = series.map((s, i) =>
-    `<span><i style="background:${s.color}"></i>${s.label}${TIER_KEYS[i] === state.plan.tier ? ' · your plan' : ''}</span>`).join('')
+    `<span><i style="background:${s.color}"></i>${s.label}${TIER_KEYS[i] === view.plan.tier ? ' · your plan' : ''}</span>`).join('')
     + '<span class="muted">Keeps saving at today\'s rate; x-axis is age.</span>';
 }
 
 function renderWhatIf(m) {
   if (!sliders) {
-    sliders = { monthly: Math.round(m.monthly / 100) * 100, retirementSpend: state.cashflow.retirementSpend,
-      realReturn: m.tier.realReturn, swr: state.retirement.swr };
+    sliders = { monthly: Math.round(m.monthly / 100) * 100, retirementSpend: view.cashflow.retirementSpend,
+      realReturn: m.tier.realReturn, swr: view.retirement.swr };
   }
   const defs = [
     { key: 'monthly', label: 'Monthly savings', min: 0, max: Math.max(20000, Math.ceil(m.monthly * 2 / 1000) * 1000), step: 100, fmt: fmtMoney },
-    { key: 'retirementSpend', label: 'Retirement spend per year', min: 20000, max: Math.max(300000, state.cashflow.retirementSpend * 2), step: 1000, fmt: fmtMoney },
+    { key: 'retirementSpend', label: 'Retirement spend per year', min: 20000, max: Math.max(300000, view.cashflow.retirementSpend * 2), step: 1000, fmt: fmtMoney },
     { key: 'realReturn', label: 'Real return', min: 0, max: 0.10, step: 0.0025, fmt: (v) => pct(v, 2) },
     { key: 'swr', label: 'Safe withdrawal rate', min: 0.025, max: 0.05, step: 0.001, fmt: (v) => pct(v, 1) },
   ];
-  const w = whatIf(state, sliders);
+  const w = whatIf(view, sliders);
   const delta = w.fireAge !== null && m.fireAge !== null ? w.fireAge - m.fireAge : null;
   const focused = document.activeElement?.dataset?.whatif;
   if (!focused) {
@@ -308,14 +319,14 @@ function onWhatIfInput(e) {
   const key = e.target.dataset.whatif;
   if (!key) return;
   sliders[key] = Number(e.target.value);
-  renderWhatIf(summary(state));
+  renderWhatIf(summary(view));
 }
 
 function renderStress() {
-  const rows = stressTests(state);
+  const rows = stressTests(view);
   $('stress').innerHTML = '<thead><tr><th>Scenario</th><th>FIRE age</th><th>Change</th></tr></thead><tbody>'
     + rows.map((r) => `<tr><td>${escapeHtml(r.label)}<div class="note muted small" style="white-space:normal">${escapeHtml(r.note)}</div></td>
-        <td class="num">${r.key === 'crash' ? pct(r.successRate) : fmtAge(r.fireAge)}${r.key === 'crash' ? '<div class="muted small">lasts to ' + state.profile.planToAge + '</div>' : ''}</td>
+        <td class="num">${r.key === 'crash' ? pct(r.successRate) : fmtAge(r.fireAge)}${r.key === 'crash' ? '<div class="muted small">lasts to ' + view.profile.planToAge + '</div>' : ''}</td>
         <td class="num ${r.delta > 0.05 || (r.key === 'crash' && r.successRate < SUCCESS_GOAL) ? 'down' : ''}">${
           r.key === 'crash' ? `${((r.successRate - r.baselineSuccessRate) * 100).toFixed(0)} pts`
             : r.delta === null ? '—' : r.delta < 0.05 ? 'none' : `+${r.delta.toFixed(1)} yrs`}</td></tr>`).join('')
@@ -325,21 +336,21 @@ function renderStress() {
 // ---- Net worth log ----------------------------------------------------------
 
 function snapshot(month) {
-  const { accounts: a, property: p, executive: e } = state;
+  const { accounts: a, property: p, executive: e } = view;
   return {
     month,
-    taxable: a.taxable + vestedAfterDrawdown(state),
+    taxable: a.taxable + vestedAfterDrawdown(view),
     retirement: a.preTax + a.roth + e.deferredComp,
     cash: a.cash,
     other: p.homeValue + p.otherAssets,
     liabilities: p.mortgage + p.otherDebts,
-    netWorth: netWorth(state),
-    contribution: monthlySavings(state),
+    netWorth: netWorth(view),
+    contribution: monthlySavings(view),
   };
 }
 
 function renderLog() {
-  const rows = [...state.log].sort((a, b) => a.month.localeCompare(b.month));
+  const rows = [...view.log].sort((a, b) => a.month.localeCompare(b.month));
   if (!rows.length) {
     $('log').innerHTML = '<tbody><tr><td class="note">No months recorded yet. Pick a month and press Update month once a month.</td></tr></tbody>';
     return;
@@ -368,17 +379,17 @@ function updateMonth() {
 // ---- Assumptions ------------------------------------------------------------
 
 function renderAssumptions(m) {
-  const r = state.retirement;
+  const r = view.retirement;
   $('assumptions').innerHTML = `<h2>Assumptions and formulas</h2>
     <p><b>Everything is in today's dollars.</b> Returns are real (after inflation), so no separate inflation rate is needed.</p>
     <p><b>Investable assets</b> = taxable + pre-tax + Roth + cash + vested company stock (after the drawdown slider) + deferred comp (if counted) + unvested (if counted) + other assets (if counted) − other debts. Home equity is in net worth but never in FIRE math because it does not pay for groceries.</p>
     <p><b>Blended tax rate</b> = pre-tax and deferred comp at ${pct(r.ordinaryTaxRate)} + taxable and company stock at ${pct(r.ltcgRate)} × ${pct(r.taxableGainFraction)} gain share + Roth and cash at 0%, weighted by balance. Today: <code>${pct(m.target.taxRate, 1)}</code>. A withdrawal of <code>spend ÷ (1 − tax)</code> leaves you the spend.</p>
     <p><b>FIRE target</b> = gross(spend − Social Security) ÷ ${pct(r.swr, 1)} + gross(Social Security) × years from FIRE age to ${r.ssStartAge} + gross(healthcare) × years from FIRE age to 65 = <code>${fmtMoney(m.target.core)} + ${fmtMoney(m.target.ssBridge)} + ${fmtMoney(m.target.healthcareBridge)} = ${fmtMoney(m.target.total)}</code>. The bridges are set aside without growth, which is conservative.</p>
-    <p><b>Years to FIRE</b>: month by month, balance × (1 + return)<sup>1/12</sup> + monthly savings, until it reaches the target. Monthly savings = take-home − expenses${state.cashflow.includeBonus ? ' + bonus ÷ 12' : ''} = <code>${fmtMoney(m.monthly)}</code>.</p>
+    <p><b>Years to FIRE</b>: month by month, balance × (1 + return)<sup>1/12</sup> + monthly savings, until it reaches the target. Monthly savings = take-home − expenses${view.cashflow.includeBonus ? ' + bonus ÷ 12' : ''} = <code>${fmtMoney(m.monthly)}</code>.</p>
     <p><b>Coast FIRE</b> = target ÷ (1 + return)<sup>years to target age</sup>: if you have this today you could stop saving and still arrive on time.</p>
     <p><b>Lean / Standard / Fat</b> = retirement spend × 20 / 25 / 32, the classic ladder with no tax or bridges.</p>
-    <p><b>Monte Carlo</b> (Advise panel and crash stress test): 2,000 paths of yearly returns drawn from a lognormal distribution with each tier's median real return and volatility. A path succeeds if money remains at age ${state.profile.planToAge} after retiring at ${state.profile.targetAge} and withdrawing the grossed-up spend (less Social Security from ${r.ssStartAge}, plus healthcare until 65). The seed is fixed, so results only change when your inputs do.</p>
-    <p><b>Tier returns</b> (low ${pct(state.tiers.low.realReturn, 1)}, medium ${pct(state.tiers.medium.realReturn, 1)}, high ${pct(state.tiers.high.realReturn, 1)} real) are planning assumptions, not forecasts. Worst drawdowns are rough peak-to-trough losses of similar mixes in 2008–09.</p>
+    <p><b>Monte Carlo</b> (Advise panel and crash stress test): 2,000 paths of yearly returns drawn from a lognormal distribution with each tier's median real return and volatility. A path succeeds if money remains at age ${view.profile.planToAge} after retiring at ${view.profile.targetAge} and withdrawing the grossed-up spend (less Social Security from ${r.ssStartAge}, plus healthcare until 65). The seed is fixed, so results only change when your inputs do.</p>
+    <p><b>Tier returns</b> (low ${pct(view.tiers.low.realReturn, 1)}, medium ${pct(view.tiers.medium.realReturn, 1)}, high ${pct(view.tiers.high.realReturn, 1)} real) are planning assumptions, not forecasts. Worst drawdowns are rough peak-to-trough losses of similar mixes in 2008–09.</p>
     <p class="disclaimer">Illustrative and educational, not financial, tax or legal advice. Bring these numbers to a licensed financial advisor and CPA before acting.</p>`;
 }
 
@@ -401,12 +412,12 @@ function closeAdvice() {
 }
 
 function renderAdvice() {
-  const tiers = evaluateTiers(state);
-  const flags = personalFlags(state, tiers);
+  const tiers = evaluateTiers(view);
+  const flags = personalFlags(view, tiers);
   const rec = tiers.results[tiers.recommended];
   const headline = tiers.anyPassing
-    ? `<b>${rec.tier.label}</b> is the lowest-risk tier that gives at least a ${pct(SUCCESS_GOAL)} chance of the money lasting to ${state.profile.planToAge} if you retire at ${state.profile.targetAge}.`
-    : `<b>No tier reaches a ${pct(SUCCESS_GOAL)} chance</b> of lasting to ${state.profile.planToAge} with a FIRE age of ${state.profile.targetAge}. ${rec.tier.label} does best at ${pct(rec.mc.successRate)}. Retiring later, spending less or saving more will matter more than the investment mix.`;
+    ? `<b>${rec.tier.label}</b> is the lowest-risk tier that gives at least an ${pct(SUCCESS_GOAL)} chance of the money lasting to ${view.profile.planToAge} if you retire at ${view.profile.targetAge}.`
+    : `<b>No tier reaches a ${pct(SUCCESS_GOAL)} chance</b> of lasting to ${view.profile.planToAge} with a FIRE age of ${view.profile.targetAge}. ${rec.tier.label} does best at ${pct(rec.mc.successRate)}. Retiring later, spending less or saving more will matter more than the investment mix.`;
 
   const card = (k) => {
     const r = tiers.results[k];
@@ -415,25 +426,25 @@ function renderAdvice() {
     const mixText = ASSET_CLASSES.filter((c) => r.tier.mix[c.key] > 0).map((c) => `${c.label} ${r.tier.mix[c.key]}%`).join(' · ');
     return `<div class="card tier ${k}">
       <h3>${r.tier.label}</h3>
-      <div class="badges">${k === tiers.recommended ? '<span class="badge rec">Recommended</span>' : ''}${k === state.plan.tier ? '<span class="badge cur">Your plan</span>' : ''}</div>
+      <div class="badges">${k === tiers.recommended ? '<span class="badge rec">Recommended</span>' : ''}${k === view.plan.tier ? '<span class="badge cur">Your plan</span>' : ''}</div>
       <div class="muted small">${r.who}</div>
       <div class="mixbar">${mix}</div>
       <div class="muted small">${mixText}</div>
       <div class="stats">
-        <div><span class="muted">Money lasts to ${state.profile.planToAge}</span><b>${pct(r.mc.successRate)}</b></div>
+        <div><span class="muted">Money lasts to ${view.profile.planToAge}</span><b>${pct(r.mc.successRate)}</b></div>
         <div><span class="muted">Median FIRE age</span><b>${r.mc.fireAgeP50 === Infinity ? '—' : r.mc.fireAgeP50}</b></div>
         <div><span class="muted">FIRE age range (10–90%)</span><b>${fmtRange(r.mc.fireAgeP10, r.mc.fireAgeP90)}</b></div>
         <div><span class="muted">Return / volatility</span><b>${pct(r.tier.realReturn, 1)} / ${pct(r.tier.volatility)}</b></div>
         <div><span class="muted">Worst drawdown</span><b>${pct(r.tier.worstDrawdown)}</b></div>
-        <div><span class="muted">On ${state.profile.targetAge} target</span><b>${pct(r.mc.reachByTargetRate)}</b></div>
+        <div><span class="muted">On ${view.profile.targetAge} target</span><b>${pct(r.mc.reachByTargetRate)}</b></div>
       </div>
       <ul>${r.points.map((p) => `<li>${p}</li>`).join('')}</ul>
-      ${k === state.plan.tier ? '' : `<button type="button" data-use-tier="${k}">Use as my plan</button>`}
+      ${k === view.plan.tier ? '' : `<button type="button" data-use-tier="${k}">Use as my plan</button>`}
     </div>`;
   };
 
-  const llm = config.llm
-    ? `<div><button type="button" id="llm-btn">Explain with ${escapeHtml(config.model)}</button>
+  const llm = me.llm
+    ? `<div><button type="button" id="llm-btn">Explain with ${escapeHtml(me.model)}</button>
        <span class="muted small"> Sends only the rounded summary below to your local model.</span>
        <div id="llm-out" class="llm-out" hidden></div></div>`
     : '<p class="muted small">Optional: set OLLAMA_URL and OLLAMA_MODEL in .env to have your local model write a plain-English explanation of these results.</p>';
@@ -456,11 +467,11 @@ function renderAdvice() {
     scheduleSave();
     renderAdvice();
   }));
-  $('llm-btn')?.addEventListener('click', () => explainWithLlm(adviceBrief(state, tiers, flags)));
+  $('llm-btn')?.addEventListener('click', () => explainWithLlm(adviceBrief(view, tiers, flags)));
 }
 
 function fmtRange(a, b) {
-  const f = (x) => (x === Infinity ? `${state.profile.planToAge}+` : x);
+  const f = (x) => (x === Infinity ? `${view.profile.planToAge}+` : x);
   return `${f(a)}–${f(b)}`;
 }
 
@@ -473,7 +484,7 @@ async function explainWithLlm(brief) {
   btn.disabled = true;
   try {
     const res = await fetch('/api/advise', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ brief }),
+      method: 'POST', headers: WRITE_HEADERS, body: JSON.stringify({ brief }),
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
@@ -488,6 +499,7 @@ async function explainWithLlm(brief) {
 
 // ---- Persistence ------------------------------------------------------------
 
+const WRITE_HEADERS = { 'Content-Type': 'application/json', 'X-PFD': '1' };
 let saveTimer = null;
 function scheduleSave() {
   setStatus('Unsaved changes…');
@@ -497,10 +509,13 @@ function scheduleSave() {
 
 async function save() {
   try {
-    const res = await fetch('/api/state', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(state),
+    const res = await fetch(`/api/dashboards/${current}`, {
+      method: 'PUT', headers: WRITE_HEADERS, body: JSON.stringify(state),
     });
-    if (!res.ok) throw new Error((await res.json()).error || `HTTP ${res.status}`);
+    if (res.status === 401) { location.href = '/'; return; }
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    state._meta = body._meta;
     setStatus(`Saved ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
   } catch (err) {
     setStatus(`Save failed: ${err.message}`, true);
@@ -516,7 +531,7 @@ function exportJson() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `financial-dashboard-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `financial-dashboard-${current}-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -525,8 +540,12 @@ async function importJson(file) {
   try {
     const data = JSON.parse(await file.text());
     if (data?.version !== 1) throw new Error('not a dashboard export (version 1)');
+    // Keep this dashboard's save version so the import is not refused as a conflict.
+    const meta = state._meta;
     state = withDefaults(data);
+    state._meta = meta;
     state.isSample = false;
+    docs[current] = state;
     sliders = null;
     renderInputs();
     renderOutputs();
@@ -538,25 +557,63 @@ async function importJson(file) {
 
 async function load() {
   try {
-    const [stateRes, configRes] = await Promise.all([fetch('/api/state'), fetch('/api/config')]);
-    if (configRes.ok) config = await configRes.json();
-    if (stateRes.ok) {
-      state = withDefaults(await stateRes.json());
-      setStatus('Loaded');
-    } else if (stateRes.status === 404) {
-      state = sampleState();
-      setStatus('Sample data, not saved yet');
-    } else {
-      throw new Error(`HTTP ${stateRes.status}`);
-    }
+    const meRes = await fetch('/api/me');
+    if (meRes.status === 401) { location.href = '/'; return; }
+    if (!meRes.ok) throw new Error(`HTTP ${meRes.status}`);
+    me = await meRes.json();
+    const dashRes = await fetch('/api/dashboards');
+    if (!dashRes.ok) throw new Error(`HTTP ${dashRes.status}`);
+    docs = Object.fromEntries(Object.entries(await dashRes.json()).map(([id, d]) => [id, d && withDefaults(d)]));
   } catch (err) {
-    state = sampleState();
-    setStatus(`Could not load saved data: ${err.message}`, true);
+    setStatus(`Could not load: ${err.message}`, true);
+    return;
   }
+  $('who').textContent = displayName(me.user);
   $('log-month').value = new Date().toISOString().slice(0, 7);
+  let saved = '';
+  try { saved = localStorage.getItem('pfd-dashboard') || ''; } catch { /* storage blocked */ }
+  await openDashboard(me.dashboards.includes(saved) ? saved : me.user);
+  if (location.hash === '#advise') openAdvice();
+}
+
+function displayName(id) {
+  return id === me.household ? 'Household' : id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+async function openDashboard(id) {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; await save(); }
+  current = id;
+  try { localStorage.setItem('pfd-dashboard', id); } catch { /* storage blocked */ }
+  if (!docs[id]) docs[id] = id === me.household ? householdState() : sampleState();
+  state = docs[id];
+  sliders = null;
+  $('tabs').innerHTML = me.dashboards.length > 1 ? me.dashboards.map((d) =>
+    `<button type="button" data-tab="${d}" class="${d === id ? 'on' : ''}">${displayName(d)}</button>`).join('') : '';
+  const meta = state._meta;
+  setStatus(meta ? `Last saved by ${displayName(meta.updatedBy)}, ${meta.updatedAt}` : 'Not saved yet');
   renderInputs();
   renderOutputs();
-  if (location.hash === '#advise') openAdvice();
+}
+
+function renderHouseholdNote() {
+  const note = $('household-note');
+  if (current !== me.household) { note.hidden = true; return; }
+  const included = me.users.filter((u) => docs[u] && !docs[u].isSample).map(displayName);
+  const missing = me.users.filter((u) => !docs[u] || docs[u].isSample).map(displayName);
+  note.hidden = false;
+  note.innerHTML = `<label style="display:flex;gap:8px;align-items:center;font-weight:600">
+      <input type="checkbox" id="combine" ${state.household.combineMembers ? 'checked' : ''}> Add each person's saved numbers</label>
+    <div class="small">${state.household.combineMembers
+      ? `${included.length ? `Totals include ${included.join(' and ')}.` : 'No one has saved a personal dashboard yet.'}`
+        + `${missing.length ? ` ${missing.join(' and ')} ${missing.length === 1 ? 'is' : 'are'} not included until they save their own.` : ''}`
+        + ' Enter only joint accounts, the house and shared expenses here. Ages, retirement spend and assumptions are the household\'s own.'
+      : 'Showing only the numbers entered on this dashboard.'}</div>`;
+}
+
+async function signOut() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; await save(); }
+  await fetch('/api/logout', { method: 'POST', headers: WRITE_HEADERS }).catch(() => {});
+  location.href = '/';
 }
 
 // ---- Wiring -----------------------------------------------------------------
@@ -596,6 +653,17 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   $('advise-btn').addEventListener('click', openAdvice);
   $('drawer-close').addEventListener('click', closeAdvice);
+  $('tabs').addEventListener('click', (e) => {
+    const id = e.target.dataset.tab;
+    if (id && id !== current) openDashboard(id);
+  });
+  $('household-note').addEventListener('change', (e) => {
+    if (e.target.id !== 'combine') return;
+    state.household.combineMembers = e.target.checked;
+    renderOutputs();
+    scheduleSave();
+  });
+  $('signout-btn').addEventListener('click', signOut);
   $('overlay').addEventListener('click', closeAdvice);
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && $('drawer').classList.contains('open')) closeAdvice();

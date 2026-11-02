@@ -9,6 +9,8 @@
 #   stop     stop the container
 #   logs     tail logs (request paths only; financial data is never logged)
 #   backups  list the daily backups of your numbers
+#   adduser <name>     add a person (up to 3) or change their password, then restart
+#   removeuser <name>  remove a person, then restart (their dashboard file stays)
 #   all      pull + build + start
 #
 # On the Mac itself: open http://localhost:8118. On a remote Podman host: ssh -L 8118:localhost:8118 <host>
@@ -105,6 +107,13 @@ case "$cmd" in
     $SUDO ls -la "$DATA_HOST_DIR/backups"
     ;;
 
+  adduser|passwd|removeuser)
+    [[ -n "${2:-}" ]] || { echo "Usage: $0 $cmd <name>"; exit 1; }
+    sub=passwd; [[ "$cmd" == removeuser ]] && sub=removeuser
+    PFD_ENV_FILE="$ENV_FILE" python3 "$PROJECT_DIR/server.py" "$sub" "$2"
+    if $SUDO podman container exists "$CONTAINER"; then "$0" start; fi
+    ;;
+
   all)
     "$0" pull
     "$0" build
@@ -112,6 +121,6 @@ case "$cmd" in
     ;;
 
   *)
-    sed -n '2,16p' "$0"
+    sed -n '2,18p' "$0"
     ;;
 esac

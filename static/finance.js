@@ -59,8 +59,41 @@ export function sampleState() {
     plan: { tier: 'medium' },
     tiers: structuredClone(DEFAULT_TIERS),
     allocation: { usStocks: 50, intlStocks: 12, bonds: 15, realEstate: 0, cash: 9, satellite: 14 },
+    household: { combineMembers: false },
     log: [],
   };
+}
+
+// The shared dashboard starts with no balances of its own: joint accounts, the house and
+// shared expenses go here, and each member's saved numbers are added on top.
+export function householdState() {
+  const s = sampleState();
+  for (const [section, keys] of Object.entries(SUMMED_FIELDS)) for (const k of keys) s[section][k] = 0;
+  s.executive.ticker = '';
+  s.household.combineMembers = true;
+  s.isSample = false;
+  return s;
+}
+
+// Balances and flows that add up across people. Ages, spend, assumptions and the
+// allocation stay the household's own.
+export const SUMMED_FIELDS = {
+  accounts: ['taxable', 'preTax', 'roth', 'cash'],
+  property: ['homeValue', 'mortgage', 'otherAssets', 'otherDebts'],
+  executive: ['vestedEquity', 'unvestedEquity', 'deferredComp'],
+  cashflow: ['monthlyTakeHome', 'monthlyExpenses', 'annualBonus'],
+  retirement: ['ssAnnual'],
+};
+
+export function combineHousehold(household, members) {
+  const out = structuredClone(household);
+  if (!household.household?.combineMembers) return out;
+  for (const m of members) {
+    for (const [section, keys] of Object.entries(SUMMED_FIELDS)) {
+      for (const k of keys) out[section][k] += Number(m[section]?.[k]) || 0;
+    }
+  }
+  return out;
 }
 
 // Fills anything missing from an older or imported file with defaults.

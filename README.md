@@ -49,14 +49,35 @@ login). Never put it behind the Cloudflare tunnel.
 | `OLLAMA_URL`, `OLLAMA_MODEL` | Optional local model that explains the advice in plain English. Blank = off |
 | `OLLAMA_TIMEOUT` | Seconds to wait for the model (default 180) |
 
-Bookmark `http://localhost:8118/#advise` to open straight into the advice panel.
+Bookmark `http://localhost:8118/app#advise` to open straight into the advice panel.
+
+## People and sign-in
+
+Up to three people, each with a login. Whoever holds `.env` is the admin.
+
+```bash
+./run.sh adduser ravi                 # or: ubuntu/build-run.sh adduser ravi (also restarts the container)
+./run.sh passwd ravi                  # change a password
+./run.sh removeuser ravi              # their dashboard file stays on disk
+```
+
+- `.env` stores a one-way scrypt hash per person (`PFD_USER_1..3`), never the password.
+- Everyone who signs in sees and can edit every dashboard: one per person, plus **Household**
+  when there are two or more people. Household holds joint accounts, the house and shared
+  expenses, and adds each person's saved balances and income on top (a checkbox turns that off).
+  Ages, retirement spend and assumptions are the household's own.
+- Every save records who made it. If two people edit the same dashboard, the second save is
+  refused with "Changed by X, reload" instead of overwriting.
+- Sessions expire after 12 idle hours; five wrong passwords lock sign-in for a minute.
+- The dashboard cannot see or move money. A login protects privacy, not accounts.
+  Data files on disk are plain JSON (mode 600): FileVault protects them at rest.
 
 ## Your data
 
-- Saved automatically to `state.json`: `./data/` locally,
+- Saved automatically, one file per dashboard in `dashboards/`: `./data/` locally,
   `~/containers/volumes/personal-financial-dashboard/data/` for the container (mode 700).
   Rebuilding the container keeps it.
-- One backup per day in `backups/`, last 60 kept. Restore by copying one over `state.json`.
+- One backup per dashboard per day in `backups/`, last 60 kept. Restore by copying one over its file in `dashboards/`.
 - **Export JSON** / **Import JSON** in the header for your own encrypted copy.
 - The server never logs request bodies. `/healthz` shows the deployed commit and build date.
 
@@ -82,16 +103,17 @@ live numbers. The code is in `static/finance.js` (math) and `static/advice.js` (
 ## Tests
 
 ```bash
-node --test tests/*.test.mjs
+./run.sh test       # node math tests + python server tests
 ```
 
 ## Layout
 
 ```
-server.py            stdlib HTTP server: static files, /api/state, /api/advise
+server.py            stdlib HTTP server: sign-in, dashboards, /api/advise; user CLI
 static/finance.js    all calculations (pure, tested)
 static/advice.js     tier strategies, recommendation, personal flags
-static/app.js        UI
+static/landing.*     landing page and sign-in
+static/app.js        dashboard UI
 static/charts.js     inline SVG charts
 run.sh               local run + tests
 ubuntu/              Containerfile + build-run.sh for the Podman host
