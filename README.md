@@ -21,11 +21,14 @@ investment risk gets you there with the most margin. Your numbers never leave th
   risk portfolios through 2,000 simulated markets each and shows the chance your money lasts.
 - **Stress-tests the plan.** A crash the year you retire, your company stock halving, a sabbatical,
   a lower withdrawal rate. Each shows how far your date moves.
-- **Tracks what you own.** Type rounded totals, or add your holdings (fund, shares, price, cost basis)
-  and let it add them up as you invest.
+- **Tracks what you own.** Type rounded totals, or keep a holdings table: import your brokerage's
+  positions CSV in one go, and refresh every price with one click (optional, through your own MCP server).
 - **Works for a household.** Up to three people, each with a sign-in, plus a shared Household view
   that adds everyone's numbers together.
-- **Shows every formula** in plain English, with your own numbers filled in.
+- **Explains itself.** Every input has an "i" that says what belongs in it, and every formula is
+  shown in plain English with your own numbers filled in.
+- **Respects how you want to retire.** Set any target age, 75 included. If your money is enough
+  earlier, it says "free to stop at 63, working to 75 by choice".
 
 ## A quick tour
 
@@ -42,18 +45,25 @@ penalty-free money to reach 59½.
 
 One row per fund, stock or cash balance. Shares × price gives the value, or type a value for
 accounts like a 401(k). With holdings switched on, the account totals, allocation and company stock
-line come from these rows, and cost basis replaces the assumed capital-gains share.
+line come from these rows, and cost basis replaces the assumed capital-gains share. The total row
+shows the holdings value, cost basis, gain and the date the prices are from.
 
 ![Holdings, allocation and projections](docs/screenshots/holdings.png)
 
-**Import CSV:** download "positions" from your brokerage (E*TRADE, Fidelity, Schwab, Vanguard and
-others) and pick the file. It is parsed in your browser and only the resulting holdings are saved.
-The importer skips the brokerage's preamble and total rows, reads the account type per row where the
-file names it, and shows a preview with adjustable column mapping before you add or replace rows.
+**Import CSV.** Download "positions" from your brokerage (E*TRADE, Fidelity, Schwab, Vanguard and
+others) and pick the file. It is parsed in your browser; only the resulting holdings are saved. The
+importer skips the brokerage's preamble and total rows, reads the account type per row where the file
+names it (Roth, IRA, 401(k), individual), turns money-market lines into cash and price-paid into
+cost basis, and shows a preview with adjustable column mapping before you add rows or replace the
+rows of the accounts the file covers. Excel files: save as CSV first.
 
-**Update prices (optional):** with `PFD_MCP_URL` pointing at an MCP server that has a `get_quotes`
-tool, one click refreshes the price of every row that has a ticker and shares. Only ticker symbols
-are sent, and only to that server.
+![Import preview](docs/screenshots/import.png)
+
+**Update prices (optional).** With `PFD_MCP_URL` pointing at an MCP server that has a `get_quotes`
+tool, one click refreshes the price of every row that has a ticker and shares, and opening a
+dashboard refreshes them by itself when the last fetch is more than 4 hours old. Stocks and ETFs get
+the latest trade price (possibly about 15 minutes delayed); mutual funds get the previous close.
+Symbols that cannot be priced are listed, never skipped silently.
 
 ### What-if simulator and stress tests
 
@@ -93,8 +103,10 @@ did. Every formula is listed at the bottom of the page.
   `backups/<dashboard>-before-reset-<time>.json`.
 - It cannot see or move money. Sign-in protects privacy between people on the same computer.
 - Optional: a local AI model ([Ollama](https://ollama.com)) can explain the advice in plain English.
-  It receives a rounded summary only, and only when you press **Explain**. Leave it unset and
-  nothing leaves the machine.
+  It receives a rounded summary only, and only when you press **Explain**.
+- Optional: **Update prices** sends ticker symbols (never quantities or values) to the MCP server you
+  configure, which looks the prices up on the internet.
+- Leave both unset and nothing leaves the machine.
 
 ## Run it yourself
 
@@ -133,7 +145,7 @@ On macOS it uses the rootless Podman machine (starting it if needed). The contai
 | `PFD_PORT` | Port for `./run.sh` (default 8118) |
 | `PFD_BIND` | Container bind address. `127.0.0.1` (default) is this computer only; `0.0.0.0` opens it to your network with no extra protection |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | Optional local model for the plain-English explanation. `http://localhost:11434` works for both `./run.sh` and the container on macOS |
-| `PFD_MCP_URL` | Optional MCP server (streamable HTTP) with a `get_quotes` tool for **Update prices** |
+| `PFD_MCP_URL` | Optional MCP server (streamable HTTP) with a `get_quotes` tool, for **Update prices** and the refresh on open. Inside a container use the host's network address, not `localhost` |
 | `PFD_REPO_URL` | Shown in the landing page's "Run your own" box |
 | `PFD_PUBLIC_DEMO`, `PFD_TRUST_PROXY` | Hosted demo mode, see [Hosting a public demo](#hosting-a-public-demo) |
 
@@ -170,6 +182,7 @@ Everything is in today's dollars with real (after-inflation) returns.
 | Coast FIRE | Target ÷ (1 + return)^(years to target age) |
 | Lean / Standard / Fat | Retirement spend × 20 / 25 / 32, the classic ladder |
 | Monte Carlo | 2,000 paths of yearly lognormal returns per tier; success = money left at your plan-to age after retiring at your target age |
+| Ages | A target retirement age before your current age becomes 65, or your current age if you are already past 65 (the plan then tests retiring now). Plan-to age must come after it; Social Security starts between 62 and 70 |
 
 Tier assumptions (editable): low 3.0% real return / 7% volatility, medium 4.5% / 11%,
 high 5.5% / 16%. These are planning assumptions, not forecasts.
@@ -180,8 +193,12 @@ The math lives in [`static/finance.js`](static/finance.js) and the advice rules 
 ## Tests
 
 ```bash
-./run.sh test     # node tests for the math, python tests for the server
+./run.sh test     # node tests for the math and the CSV importer, python tests for the server
 ```
+
+The importer is tested against E*TRADE-, Fidelity-, Schwab- and Vanguard-style files in
+[`tests/fixtures/`](tests/fixtures/). Brokerages change their downloads; if yours is read wrongly,
+the column mapping in the preview fixes it, and an issue with the header row helps fix the default.
 
 ## Project layout
 
@@ -189,18 +206,19 @@ The math lives in [`static/finance.js`](static/finance.js) and the advice rules 
 server.py            stdlib HTTP server: sign-in, dashboards, optional Ollama call, user CLI
 static/finance.js    all calculations, incl. holdings and household totals (pure, tested)
 static/advice.js     tier strategies, recommendation, personal flags
+static/importer.js   brokerage positions CSV -> holdings (pure, tested)
 static/app.js        dashboard UI
 static/landing.*     landing page and sign-in
 static/charts.js     inline SVG charts
 run.sh               run locally, tests, user management
 ubuntu/              Containerfile + build-run.sh for Podman
-tests/               math and server tests
+tests/               math, importer and server tests; fixtures/ holds sample brokerage files
+VERSION              shown in the page footer with the build commit and date
 docs/screenshots/    the images above (sample data)
 ```
 
 ## Roadmap
 
-- Import holdings from brokerage CSV downloads (E*TRADE, Fidelity, Schwab, Vanguard)
 - Import 12 months of transactions to measure real spending
 - Read-only account sync where an official API exists
 
