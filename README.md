@@ -1,140 +1,197 @@
 # Personal Financial Dashboard
 
-A private FIRE (financial independence) dashboard with a risk-tiered investment
-advisor. It runs in one Podman container on this machine, bound to `127.0.0.1`.
-No logins, no analytics, no external scripts or fonts. Your numbers stay in a
-Podman volume.
+**How much is enough, and when do you get there?**
 
-Based on the build described in Nadia Hansen's article "How Much Is Enough?"
-(LinkedIn, 2026-10-25), with these corrections and additions:
+A private FIRE (financial independence, retire early) dashboard that runs on your own computer.
+It works out your real freedom number, how many years until you reach it, and which level of
+investment risk gets you there with the most margin. Your numbers never leave the machine.
 
-| Article version | This dashboard |
-|---|---|
-| Home equity counts toward FIRE | Home equity is in net worth only; FIRE uses investable assets |
-| FIRE number = spend × 25 | Target = tax-grossed spend ÷ withdrawal rate + Social Security bridge + healthcare-to-65 bridge. The 20×/25×/32× ladder is still shown |
-| 4% default | 3.5% default (40+ year retirements); editable |
-| Fixed 3/5/7% projections | Plus Monte Carlo: chance the money lasts to your plan age, FIRE-age range |
-| No advice | **Advise** button: low / medium / high risk tiers simulated on your numbers, a rule-based recommendation, and personal flags |
+![Dashboard](docs/screenshots/dashboard.png)
 
-The article's sample numbers do not add up: its inputs sum to $1.84M (it prints $1.82M), and
-$1.82M reaching $2.46M at 5% real with $11,300/month takes about 3 years, not 7.8.
-`tests/finance.test.mjs` checks both.
+*All screenshots use made-up sample numbers for two fictional people, Alex and Sam.*
 
-## Run
+---
 
-Locally (Mac):
+## What it does
+
+- **Finds your real FIRE number.** Not just spending × 25: it grosses up for tax, uses a withdrawal
+  rate suited to a long retirement (3.5% by default), and sets money aside for healthcare before 65
+  and for the years before Social Security starts. Home equity counts in net worth but never toward FIRE.
+- **Gives investment advice tested on your numbers.** The **Advise** button runs low, medium and high
+  risk portfolios through 2,000 simulated markets each and shows the chance your money lasts.
+- **Stress-tests the plan.** A crash the year you retire, your company stock halving, a sabbatical,
+  a lower withdrawal rate. Each shows how far your date moves.
+- **Tracks what you own.** Type rounded totals, or add your holdings (fund, shares, price, cost basis)
+  and let it add them up as you invest.
+- **Works for a household.** Up to three people, each with a sign-in, plus a shared Household view
+  that adds everyone's numbers together.
+- **Shows every formula** in plain English, with your own numbers filled in.
+
+## A quick tour
+
+### Investment strategy: low, medium and high risk
+
+Each tier is simulated with your savings, spending and retirement age. The recommendation is the
+lowest-risk tier with at least an 85% chance the money lasts. Below it, flags specific to you:
+company-stock concentration, cash reserve, allocation drift, and whether you have enough
+penalty-free money to reach 59½.
+
+![Advise panel](docs/screenshots/advise.png)
+
+### Holdings
+
+One row per fund, stock or cash balance. Shares × price gives the value, or type a value for
+accounts like a 401(k). With holdings switched on, the account totals, allocation and company stock
+line come from these rows, and cost basis replaces the assumed capital-gains share.
+
+![Holdings, allocation and projections](docs/screenshots/holdings.png)
+
+### What-if simulator and stress tests
+
+![What-if and stress tests](docs/screenshots/whatif-stress.png)
+
+### Household view
+
+Joint accounts, the house and shared expenses live on the Household dashboard. Each person's saved
+balances and income are added on top. Everyone who signs in sees every dashboard.
+
+![Household](docs/screenshots/household.png)
+
+### Monthly log and formulas
+
+Record each month once; it splits the change in net worth into what you saved and what the market
+did. Every formula is listed at the bottom of the page.
+
+![Net worth log and assumptions](docs/screenshots/assumptions.png)
+
+### Landing page and sign-in
+
+<p>
+  <img src="docs/screenshots/landing.png" alt="Landing page" width="62%">
+  <img src="docs/screenshots/mobile.png" alt="Phone view" width="22%">
+</p>
+
+![Sign in and run your own](docs/screenshots/landing-signin.png)
+
+---
+
+## Privacy
+
+- Runs on your computer at `http://localhost:8118`. It is not a website and has no cloud service.
+- No bank logins, no account numbers, no analytics, no outside scripts or fonts.
+- Each dashboard is a JSON file in a local folder (mode 600), with one backup per day.
+- It cannot see or move money. Sign-in protects privacy between people on the same computer.
+- Optional: a local AI model ([Ollama](https://ollama.com)) can explain the advice in plain English.
+  It receives a rounded summary only, and only when you press **Explain**. Leave it unset and
+  nothing leaves the machine.
+
+## Run it yourself
+
+You need Python 3.11 or newer (no packages to install), or Podman if you prefer a container.
 
 ```bash
-cp .env.example .env     # once; mode 600, gitignored
-./run.sh                 # http://localhost:8118, data in ./data
-./run.sh test            # calculation tests
+git clone https://github.com/k9aif/pfd.git personal-financial-dashboard
+cd personal-financial-dashboard
+cp .env.example .env
+./run.sh                      # open http://localhost:8118 and sign in with demo / demo
 ```
 
-In a Podman container (same script on the MacBook and on an Ubuntu host):
+That starts in **demo mode** with sample numbers. When you are ready to use your own:
 
 ```bash
+./run.sh adduser yourname     # up to 3 people; asks for a password; demo login turns off
+./run.sh                      # restart
+```
+
+### In a Podman container (macOS or Linux)
+
+```bash
+ubuntu/build-run.sh adduser yourname
 ubuntu/build-run.sh all       # git pull (if there is a remote) + build + start
 ubuntu/build-run.sh logs | stop | backups
 ```
 
-On macOS it uses the rootless Podman machine (starting it if needed) and no sudo. The container
-binds to `127.0.0.1:8118` only: open http://localhost:8118. On a remote host, tunnel with
-`ssh -L 8118:localhost:8118 <host>`. `PFD_BIND=0.0.0.0` in `.env` opens it to the LAN (there is no
-login). Never put it behind the Cloudflare tunnel.
+On macOS it uses the rootless Podman machine (starting it if needed). The container listens on
+`127.0.0.1:8118` only. Data lives in `~/containers/volumes/personal-financial-dashboard/data`.
+
+### Settings (`.env`)
 
 | Setting | Meaning |
 |---|---|
+| `PFD_USER_1..3` | People who can sign in, as one-way scrypt hashes. Set with `./run.sh adduser`, never by hand |
 | `PFD_PORT` | Port for `./run.sh` (default 8118) |
-| `PFD_BIND` | Container bind address (default 127.0.0.1) |
-| `OLLAMA_URL`, `OLLAMA_MODEL` | Optional local model that explains the advice in plain English. Blank = off |
-| `OLLAMA_TIMEOUT` | Seconds to wait for the model (default 180) |
-
-Bookmark `http://localhost:8118/app#advise` to open straight into the advice panel.
+| `PFD_BIND` | Container bind address. `127.0.0.1` (default) is this computer only; `0.0.0.0` opens it to your network with no extra protection |
+| `OLLAMA_URL`, `OLLAMA_MODEL` | Optional local model for the plain-English explanation. `http://localhost:11434` works for both `./run.sh` and the container on macOS |
+| `PFD_REPO_URL` | Shown in the landing page's "Run your own" box |
 
 ## People and sign-in
 
-Up to three people, each with a login. Whoever holds `.env` is the admin.
+- Up to three people. Whoever can edit `.env` is the admin: `./run.sh adduser | passwd | removeuser <name>`.
+- With no one added, the app runs in demo mode (`demo` / `demo`). Adding the first person turns it off.
+- Everyone who signs in can view and edit every dashboard. Each save records who made it, and if two
+  people edit the same dashboard at once, the second save is refused with "Changed by X, reload"
+  instead of overwriting.
+- Sessions expire after 12 idle hours. Five wrong passwords lock sign-in for a minute.
 
-With no one added yet it runs in **demo mode**: sign in with `demo` / `demo` to explore sample
-numbers. Adding the first person turns demo login off.
+## How the numbers work
 
-```bash
-./run.sh adduser ravi                 # or: ubuntu/build-run.sh adduser ravi (also restarts the container)
-./run.sh passwd ravi                  # change a password
-./run.sh removeuser ravi              # their dashboard file stays on disk
-```
+Everything is in today's dollars with real (after-inflation) returns.
 
-- `.env` stores a one-way scrypt hash per person (`PFD_USER_1..3`), never the password.
-- Everyone who signs in sees and can edit every dashboard: one per person, plus **Household**
-  when there are two or more people. Household holds joint accounts, the house and shared
-  expenses, and adds each person's saved balances and income on top (a checkbox turns that off).
-  Ages, retirement spend and assumptions are the household's own.
-- Every save records who made it. If two people edit the same dashboard, the second save is
-  refused with "Changed by X, reload" instead of overwriting.
-- Sessions expire after 12 idle hours; five wrong passwords lock sign-in for a minute.
-- The dashboard cannot see or move money. A login protects privacy, not accounts.
-  Data files on disk are plain JSON (mode 600): FileVault protects them at rest.
+| Number | Formula |
+|---|---|
+| Investable assets | Taxable + pre-tax + Roth + cash + vested company stock + deferred comp (optional) − other debts. Home equity is excluded |
+| Tax gross-up | Blended rate by where the money sits: ordinary rate on pre-tax, capital-gains rate × gain share on taxable, 0% on Roth and cash |
+| FIRE target | gross(spend − Social Security) ÷ withdrawal rate + gross(Social Security) × years until it starts + gross(healthcare) × years until 65 |
+| Years to FIRE | Month by month: balance × (1 + return)^(1/12) + monthly savings, until it reaches the target |
+| Coast FIRE | Target ÷ (1 + return)^(years to target age) |
+| Lean / Standard / Fat | Retirement spend × 20 / 25 / 32, the classic ladder |
+| Monte Carlo | 2,000 paths of yearly lognormal returns per tier; success = money left at your plan-to age after retiring at your target age |
 
-## Holdings (optional)
+Tier assumptions (editable): low 3.0% real return / 7% volatility, medium 4.5% / 11%,
+high 5.5% / 16%. These are planning assumptions, not forecasts.
 
-Instead of typing account totals, add one row per fund, stock or cash balance: account
-(taxable, pre-tax, Roth, cash, vested company stock), name or ticker, asset class, shares and
-price (or just a value), and optional cost basis. With "Use holdings" on, the account totals,
-company stock line and allocation percentages come from the rows, and a cost basis on every
-taxable row replaces the assumed gain share. Common index funds get their asset class filled in.
-As you invest, raise the shares or add a row per purchase; update prices monthly, then
-**Update month** records the snapshot.
-
-## Your data
-
-- Saved automatically, one file per dashboard in `dashboards/`: `./data/` locally,
-  `~/containers/volumes/personal-financial-dashboard/data/` for the container (mode 700).
-  Rebuilding the container keeps it.
-- One backup per dashboard per day in `backups/`, last 60 kept. Restore by copying one over its file in `dashboards/`.
-- **Export JSON** / **Import JSON** in the header for your own encrypted copy.
-- The server never logs request bodies. `/healthz` shows the deployed commit and build date.
-
-## What the Advise button does
-
-1. Runs 2,000 simulated market paths for each tier (low 3.0%, medium 4.5%, high 5.5%
-   median real return; 7/11/16% volatility). Seeded, so results only change when inputs do.
-2. Recommends the lowest-risk tier with at least an 85% chance the money lasts to your
-   plan age if you retire at your target age.
-3. Flags your situation from fixed rules: company-stock concentration, cash months,
-   allocation drift, penalty-free money to 59½, savings rate, deferred comp, debt rate,
-   sequence risk.
-4. Optionally sends a rounded summary (no names or account details) to your local
-   Ollama model for a written explanation. The model explains; it never calculates.
-
-Strategy level only: it does not pick funds or tickers. Not financial advice.
-
-## Formulas
-
-Every formula is shown in plain English at the bottom of the page with your
-live numbers. The code is in `static/finance.js` (math) and `static/advice.js` (rules).
+The math lives in [`static/finance.js`](static/finance.js) and the advice rules in
+[`static/advice.js`](static/advice.js), both covered by tests.
 
 ## Tests
 
 ```bash
-./run.sh test       # node math tests + python server tests
+./run.sh test     # node tests for the math, python tests for the server
 ```
 
-## Layout
+## Project layout
 
 ```
-server.py            stdlib HTTP server: sign-in, dashboards, /api/advise; user CLI
-static/finance.js    all calculations incl. holdings (pure, tested)
+server.py            stdlib HTTP server: sign-in, dashboards, optional Ollama call, user CLI
+static/finance.js    all calculations, incl. holdings and household totals (pure, tested)
 static/advice.js     tier strategies, recommendation, personal flags
-static/landing.*     landing page and sign-in
 static/app.js        dashboard UI
+static/landing.*     landing page and sign-in
 static/charts.js     inline SVG charts
-run.sh               local run + tests
-ubuntu/              Containerfile + build-run.sh for the Podman host
+run.sh               run locally, tests, user management
+ubuntu/              Containerfile + build-run.sh for Podman
+tests/               math and server tests
+docs/screenshots/    the images above (sample data)
 ```
 
 ## Roadmap
 
-- **Phase 2: account sync (read-only).** E*TRADE Accounts API (OAuth 1.0a; consumer
-  key/secret in `.env`, daily browser approval) and/or SimpleFIN Bridge for other
-  institutions. Only GET endpoints for balances and positions; account numbers never stored.
-# pfd
+- Import holdings from brokerage CSV downloads (E*TRADE, Fidelity, Schwab, Vanguard)
+- Import 12 months of transactions to measure real spending
+- Read-only account sync where an official API exists
+
+## Credits
+
+Inspired by Nadia Hansen's article *How Much Is Enough? Build Your Freedom Dashboard With Claude*
+(October 2026), which describes the FIRE milestone ladder and the monthly money-date habit this
+dashboard builds on.
+
+## Disclaimer
+
+Educational and illustrative only. This is not financial, tax or legal advice. The simulations use
+assumed returns, and real markets can do worse. Take your numbers to a licensed financial advisor
+and CPA before acting.
+
+## License
+
+[Apache License 2.0](LICENSE)

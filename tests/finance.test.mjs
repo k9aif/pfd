@@ -18,23 +18,22 @@ function classic() {
   return s;
 }
 
-test('article sample: FIRE number is annual spend x 25 at 4%', () => {
+test('classic rule: FIRE number is annual spend x 25 at 4%', () => {
   const s = classic();
   assert.equal(f.fireTarget(s).total, 98400 * 25);
 });
 
-test('article sample: net worth adds to 1.84M, not the 1.82M printed', () => {
+test('net worth adds every asset and subtracts every debt', () => {
   const s = classic();
   assert.equal(f.netWorth(s), 872000 + 548000 + 120000 + 420000 - 120000);
   assert.equal(f.netWorth(s), 1840000);
 });
 
-test('article sample: savings rate 58%', () => {
+test('savings rate is saved / take-home', () => {
   close(f.savingsRate(classic()), 11300 / 19500, 1e-12);
 });
 
-test('article sample: years to FIRE at 5% is about 3, not 7.8', () => {
-  // 1.82M growing at 5% real with 11,300/month reaches 2.46M in under 3 years.
+test('years to FIRE: growth plus savings, checked against the no-growth case', () => {
   const months = f.monthsToTarget(1820000, 2460000, 0.05, 11300);
   assert.ok(months > 30 && months < 36, `months=${months}`);
   // Even with zero growth it is 640K / 11.3K = 56.6 months, i.e. 4.7 years.
