@@ -603,10 +603,10 @@ function scheduleSave() {
   saveTimer = setTimeout(save, 600);
 }
 
-async function save() {
+async function save({ reset = false } = {}) {
   try {
     const res = await fetch(`/api/dashboards/${current}`, {
-      method: 'PUT', headers: WRITE_HEADERS, body: JSON.stringify(state),
+      method: 'PUT', headers: reset ? { ...WRITE_HEADERS, 'X-PFD-Reset': '1' } : WRITE_HEADERS, body: JSON.stringify(state),
     });
     if (res.status === 401) { location.href = '/'; return; }
     const body = await res.json();
@@ -621,6 +621,39 @@ async function save() {
 function setStatus(text, error = false) {
   $('save-status').textContent = text;
   $('save-status').classList.toggle('error', error);
+}
+
+// First click arms the button, second click within 4 seconds resets this dashboard.
+let resetArmed = null;
+async function resetDashboard() {
+  const button = $('reset-btn');
+  if (!resetArmed) {
+    button.textContent = 'Click again to reset';
+    button.classList.add('armed');
+    resetArmed = setTimeout(disarmReset, 4000);
+    return;
+  }
+  disarmReset();
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  const meta = state._meta;
+  state = current === me.household ? householdState() : sampleState();
+  state._meta = meta;
+  docs[current] = state;
+  sliders = null;
+  renderInputs();
+  renderHoldings();
+  renderOutputs();
+  if (me.publicDemo || meta) {
+    await save({ reset: true });
+    if (!me.publicDemo) setStatus(`Reset to ${current === me.household ? 'empty' : 'sample'}; previous numbers kept in backups`);
+  }
+}
+
+function disarmReset() {
+  clearTimeout(resetArmed);
+  resetArmed = null;
+  $('reset-btn').textContent = 'Reset to sample';
+  $('reset-btn').classList.remove('armed');
 }
 
 function exportJson() {
@@ -750,6 +783,7 @@ document.addEventListener('DOMContentLoaded', () => {
     scheduleSave();
   });
   $('export-btn').addEventListener('click', exportJson);
+  $('reset-btn').addEventListener('click', resetDashboard);
   $('import-btn').addEventListener('click', () => $('import-file').click());
   $('import-file').addEventListener('change', (e) => {
     if (e.target.files[0]) importJson(e.target.files[0]);

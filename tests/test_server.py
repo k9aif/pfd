@@ -172,6 +172,23 @@ class Http(unittest.TestCase):
         _, all_docs = self.call("GET", "/api/dashboards", cookie=ravi)
         self.assertEqual(all_docs["household"]["x"], 2)
 
+    def test_reset_keeps_a_copy_of_what_it_replaced(self):
+        token = self.login()
+        _, docs = self.call("GET", "/api/dashboards", cookie=token)
+        current_meta = (docs["ravi"] or {}).get("_meta")
+        res, saved = self.call("PUT", "/api/dashboards/ravi", {"version": 1, "mine": "real", "_meta": current_meta}, cookie=token)
+        self.assertEqual(res.status, 200, saved)
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        conn.request("PUT", "/api/dashboards/ravi", json.dumps({"version": 1, "_meta": saved["_meta"]}),
+                     {"Content-Type": "application/json", "X-PFD": "1", "X-PFD-Reset": "1",
+                      "Cookie": f"{server.SESSION_COOKIE}={token}"})
+        self.assertEqual(conn.getresponse().status, 200)
+        copies = list(server.BACKUP_DIR.glob("ravi-before-reset-*.json"))
+        self.assertEqual(len(copies), 1)
+        self.assertEqual(json.loads(copies[0].read_text())["mine"], "real")
+        _, docs = self.call("GET", "/api/dashboards", cookie=token)
+        self.assertNotIn("mine", docs["ravi"])
+
     def test_files_are_private_on_disk(self):
         token = self.login()
         self.call("PUT", "/api/dashboards/ravi", {"version": 1}, cookie=token)

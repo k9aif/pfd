@@ -300,9 +300,15 @@ def write_sandbox(docs: dict, dashboard_id: str, payload: dict, user: str) -> di
         return meta
 
 
-def write_dashboard(dashboard_id: str, payload: dict, user: str) -> dict:
+def write_dashboard(dashboard_id: str, payload: dict, user: str, reset: bool = False) -> dict:
     with _write_lock:
-        meta = next_meta(read_dashboard(dashboard_id), payload, user)
+        current = read_dashboard(dashboard_id)
+        meta = next_meta(current, payload, user)
+        if reset and current is not None:
+            # The daily backup is overwritten through the day, so keep what a reset replaces.
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            _atomic_write(BACKUP_DIR / f"{dashboard_id}-before-reset-{stamp}.json",
+                          json.dumps(current, indent=2, sort_keys=True).encode("utf-8"))
         payload = {**payload, "_meta": meta}
         body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
         _atomic_write(dashboard_path(dashboard_id), body)
@@ -613,7 +619,7 @@ class Handler(BaseHTTPRequestHandler):
             if PUBLIC_DEMO:
                 meta = write_sandbox(sandbox(self.cookie(SESSION_COOKIE)), m.group(1), payload, user)
             else:
-                meta = write_dashboard(m.group(1), payload, user)
+                meta = write_dashboard(m.group(1), payload, user, reset=self.headers.get("X-PFD-Reset") == "1")
         except Conflict as exc:
             self.send_json(HTTPStatus.CONFLICT, {"error": str(exc)})
             return
