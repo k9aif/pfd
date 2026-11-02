@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Personal Financial Dashboard: build and run helper (single container, no pod needed)
-# Run from any directory on the Podman host (the script uses sudo itself).
+# Run from any directory. On Linux it uses sudo itself; on macOS it uses the rootless Podman machine.
 #
 # Commands:
-#   pull     get the latest code (git pull) into this checkout
+#   pull     get the latest code (git pull) into this checkout (skipped when there is no remote)
 #   build    build the personal-financial-dashboard container image
 #   start    (or up) start the container on 127.0.0.1:8118 (private: no Cloudflare tunnel, ever)
 #   stop     stop the container
@@ -11,7 +11,7 @@
 #   backups  list the daily backups of your numbers
 #   all      pull + build + start
 #
-# Reach it from your Mac:  ssh -L 8118:localhost:8118 <podman-host>  then open http://localhost:8118
+# On the Mac itself: open http://localhost:8118. On a remote Podman host: ssh -L 8118:localhost:8118 <host>
 # To expose it on the LAN instead, set PFD_BIND=0.0.0.0 in .env (anyone on the network can then read it).
 
 set -euo pipefail
@@ -26,11 +26,18 @@ PORT=8118
 DATA_HOST_DIR="${HOME}/containers/volumes/personal-financial-dashboard/data"
 ENV_FILE="$PROJECT_DIR/.env"
 
+# macOS: rootless Podman machine, no sudo, and the VM maps file ownership itself.
+if [[ "$(uname)" == "Darwin" ]]; then MAC=1; SUDO=""; else MAC=0; SUDO="sudo"; fi
+
 cmd="${1:-help}"
 
 case "$cmd" in
 
   pull)
+    if ! git -C "$PROJECT_DIR" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+      echo "No git remote for this checkout; building from the working copy."
+      exit 0
+    fi
     echo "Pulling the latest code into $PROJECT_DIR ..."
     git -C "$PROJECT_DIR" pull --ff-only
     echo "Now at: $(git -C "$PROJECT_DIR" log --oneline -1)"
@@ -41,7 +48,10 @@ case "$cmd" in
     cd "$PROJECT_DIR"
     COMMIT=$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)
     BUILT=$(date +%Y-%m-%d)
-    sudo podman build -t "$IMAGE" -f ubuntu/Containerfile \
+    if [[ $MAC == 1 ]] && ! podman machine inspect --format "{{.State}}" 2>/dev/null | grep -q running; then
+      echo "Starting the Podman machine ..."; podman machine start
+    fi
+    $SUDO podman build --format docker -t "$IMAGE" -f ubuntu/Containerfile \
       --build-arg PFD_COMMIT="$COMMIT" --build-arg PFD_BUILT="$BUILT" .
     echo "Build $COMMIT · $BUILT"
     echo "Build complete: $IMAGE"
@@ -52,13 +62,15 @@ case "$cmd" in
     chmod 600 "$ENV_FILE"
     BIND=$(grep -E '^PFD_BIND=' "$ENV_FILE" | tail -1 | cut -d= -f2)
     BIND="${BIND:-127.0.0.1}"
-    sudo mkdir -p "$DATA_HOST_DIR"
-    # The container runs as UID 1001 (not root), so it must be able to write here.
-    sudo chown -R 1001:0 "$DATA_HOST_DIR"
-    sudo chmod 700 "$DATA_HOST_DIR"
+    $SUDO mkdir -p "$DATA_HOST_DIR"
+    if [[ $MAC == 0 ]]; then
+      # The container runs as UID 1001 (not root), so it must be able to write here.
+      sudo chown -R 1001:0 "$DATA_HOST_DIR"
+    fi
+    $SUDO chmod 700 "$DATA_HOST_DIR"
     echo "Starting $CONTAINER ..."
-    sudo podman rm -f "$CONTAINER" 2>/dev/null || true
-    sudo podman run -d \
+    $SUDO podman rm -f "$CONTAINER" 2>/dev/null || true
+    $SUDO podman run -d \
       --name "$CONTAINER" \
       --restart=always \
       -p "$BIND:$PORT:8118" \
@@ -70,9 +82,9 @@ case "$cmd" in
     echo "  Personal Financial Dashboard"
     if [[ "$BIND" == "127.0.0.1" ]]; then
       echo "  Site:    http://localhost:${PORT}/   (this host only)"
-      echo "  From your Mac: ssh -L ${PORT}:localhost:${PORT} $(hostname)"
+      [[ $MAC == 1 ]] || echo "  From your Mac: ssh -L ${PORT}:localhost:${PORT} $(hostname)"
     else
-      HOST_IP=$(hostname -I | awk '{print $1}')
+      if [[ $MAC == 1 ]]; then HOST_IP=$(ipconfig getifaddr en0 || echo localhost); else HOST_IP=$(hostname -I | awk '{print $1}'); fi
       echo "  Site:    http://${HOST_IP}:${PORT}/   (LAN, no login)"
     fi
     echo "  Health:  http://localhost:${PORT}/healthz"
@@ -82,15 +94,15 @@ case "$cmd" in
     ;;
 
   stop)
-    sudo podman stop "$CONTAINER" && sudo podman rm "$CONTAINER"
+    $SUDO podman stop "$CONTAINER" && $SUDO podman rm "$CONTAINER"
     ;;
 
   logs)
-    sudo podman logs -f "$CONTAINER"
+    $SUDO podman logs -f "$CONTAINER"
     ;;
 
   backups)
-    sudo ls -la "$DATA_HOST_DIR/backups"
+    $SUDO ls -la "$DATA_HOST_DIR/backups"
     ;;
 
   all)

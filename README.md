@@ -30,15 +30,16 @@ cp .env.example .env     # once; mode 600, gitignored
 ./run.sh test            # calculation tests
 ```
 
-On the Podman host (Ubuntu), like the other apps:
+In a Podman container (same script on the MacBook and on an Ubuntu host):
 
 ```bash
-ubuntu/build-run.sh all       # git pull + build + start
+ubuntu/build-run.sh all       # git pull (if there is a remote) + build + start
 ubuntu/build-run.sh logs | stop | backups
 ```
 
-The container binds to `127.0.0.1:8118` only. From the Mac: `ssh -L 8118:localhost:8118 <podman-host>`
-and open http://localhost:8118. `PFD_BIND=0.0.0.0` in `.env` opens it to the LAN (there is no
+On macOS it uses the rootless Podman machine (starting it if needed) and no sudo. The container
+binds to `127.0.0.1:8118` only: open http://localhost:8118. On a remote host, tunnel with
+`ssh -L 8118:localhost:8118 <host>`. `PFD_BIND=0.0.0.0` in `.env` opens it to the LAN (there is no
 login). Never put it behind the Cloudflare tunnel.
 
 | Setting | Meaning |
@@ -53,7 +54,7 @@ Bookmark `http://localhost:8118/#advise` to open straight into the advice panel.
 ## Your data
 
 - Saved automatically to `state.json`: `./data/` locally,
-  `~/containers/volumes/personal-financial-dashboard/data/` on the Podman host (mode 700).
+  `~/containers/volumes/personal-financial-dashboard/data/` for the container (mode 700).
   Rebuilding the container keeps it.
 - One backup per day in `backups/`, last 60 kept. Restore by copying one over `state.json`.
 - **Export JSON** / **Import JSON** in the header for your own encrypted copy.
