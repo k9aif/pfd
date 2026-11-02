@@ -14,7 +14,7 @@
 #   all      pull + build + start
 #
 # On the Mac itself: open http://localhost:8118. On a remote Podman host: ssh -L 8118:localhost:8118 <host>
-# To expose it on the LAN instead, set PFD_BIND=0.0.0.0 in .env (anyone on the network can then read it).
+# To expose it on the LAN instead, set PFD_BIND=0.0.0.0 in .env (anyone on the network reaches the sign-in page; add a user first so demo login is off).
 
 set -euo pipefail
 
@@ -97,7 +97,7 @@ case "$cmd" in
       [[ $MAC == 1 ]] || echo "  From your Mac: ssh -L ${PORT}:localhost:${PORT} $(hostname)"
     else
       if [[ $MAC == 1 ]]; then HOST_IP=$(ipconfig getifaddr en0 || echo localhost); else HOST_IP=$(hostname -I | awk '{print $1}'); fi
-      echo "  Site:    http://${HOST_IP}:${PORT}/   (LAN, no login)"
+      echo "  Site:    http://${HOST_IP}:${PORT}/   (your network; sign-in required)"
     fi
     echo "  Health:  http://localhost:${PORT}/healthz"
     echo "  Data:    $DATA_HOST_DIR"
