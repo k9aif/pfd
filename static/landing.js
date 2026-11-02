@@ -1,8 +1,15 @@
 const $ = (id) => document.getElementById(id);
 
+function showVersion(b) {
+  if (!b?.version) return;
+  document.getElementById('version').textContent =
+    `Personal Financial Dashboard version ${b.version} · build ${b.commit} · deployed ${b.built}`;
+}
+
 async function showDemoHint() {
   try {
     const status = await (await fetch('/api/status')).json();
+    showVersion(status);
     if (status.demo) {
       $('demo-hint').hidden = false;
       $('name').value = 'demo';

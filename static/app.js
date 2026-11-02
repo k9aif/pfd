@@ -721,6 +721,7 @@ async function load() {
     return;
   }
   $('who').textContent = displayName(me.user);
+  if (me.version) $('version').textContent = `Personal Financial Dashboard version ${me.version} · build ${me.commit} · deployed ${me.built}`;
   if (me.demo) $('who').textContent = 'Demo mode';
   if (me.publicDemo) {
     const repo = me.repoUrl ? ` <a href="${escapeAttr(me.repoUrl.replace(/\.git$/, ''))}" rel="noopener">Run your own private copy</a>.` : '';

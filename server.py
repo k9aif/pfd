@@ -66,7 +66,25 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "").rstrip("/")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "")
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "180"))
 REPO_URL = os.environ.get("PFD_REPO_URL", "").strip()
-BUILD = {"commit": os.environ.get("PFD_COMMIT", "dev"), "built": os.environ.get("PFD_BUILT", "dev")}
+
+
+def build_info() -> dict[str, str]:
+    """What is running: VERSION from the repo; the commit and build date baked into the image by
+    build-run.sh (PFD_COMMIT / PFD_BUILT), or read from git when running from a checkout."""
+    import subprocess
+    version = (ROOT / "VERSION").read_text().strip() if (ROOT / "VERSION").exists() else "dev"
+    commit = os.environ.get("PFD_COMMIT", "").strip()
+    built = os.environ.get("PFD_BUILT", "").strip()
+    if not commit or commit == "unknown":
+        try:
+            commit = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"],
+                                    capture_output=True, text=True, timeout=3).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            commit = ""
+    return {"version": version, "commit": commit or "unknown", "built": built or "local run"}
+
+
+BUILD = build_info()
 
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -481,7 +499,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"ok": True, **BUILD})
         elif path == "/api/status":
             self.send_json(HTTPStatus.OK, {"usersConfigured": not DEMO, "demo": DEMO, "publicDemo": PUBLIC_DEMO,
-                                           "maxUsers": MAX_USERS})
+                                           "maxUsers": MAX_USERS, **BUILD})
         elif path.startswith("/static/"):
             self.serve_static(path.removeprefix("/static/"))
         elif not path.startswith("/api/"):

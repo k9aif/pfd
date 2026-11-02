@@ -205,6 +205,13 @@ class Http(unittest.TestCase):
         self.call("POST", "/api/logout", cookie=token)
         self.assertEqual(self.call("GET", "/api/me", cookie=token)[0].status, 401)
 
+    def test_version_is_reported(self):
+        _, health = self.call("GET", "/healthz")
+        self.assertEqual(health["version"], (Path(server.ROOT) / "VERSION").read_text().strip())
+        self.assertTrue(health["commit"])
+        _, status = self.call("GET", "/api/status")
+        self.assertEqual(status["version"], health["version"])
+
     def test_static_cannot_escape(self):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
         conn.request("GET", "/static/../server.py")
