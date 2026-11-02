@@ -677,13 +677,28 @@ const today = () => new Date().toLocaleDateString('en-CA');
 // ---- Price updates -------------------------------------------------------------
 // Asks the server, which asks the MCP server's get_quotes tool. Only ticker symbols are sent.
 
-async function updatePrices() {
+// Opening a dashboard refreshes its prices when the last fetch is older than this.
+const AUTO_REFRESH_MS = 4 * 3600 * 1000;
+
+function pricedRows(rows) {
+  return rows.filter((r) => r.assetClass !== 'cash' && Number(r.shares) > 0 && tickerOf(r));
+}
+
+function maybeAutoRefresh() {
+  const fetched = Date.parse(state.holdings.pricesFetchedAt || '');
+  if (me.quotes && pricedRows(state.holdings.rows).length && !(Date.now() - fetched < AUTO_REFRESH_MS)) {
+    updatePrices({ auto: true });
+  }
+}
+
+async function updatePrices({ auto = false } = {}) {
   const button = $('holding-quotes');
-  const rows = state.holdings.rows;
-  const priced = rows.filter((r) => r.assetClass !== 'cash' && Number(r.shares) > 0 && tickerOf(r));
+  const target = state;
+  const rows = target.holdings.rows;
+  const priced = pricedRows(rows);
   const leftAlone = rows.length - priced.length;
   if (!priced.length) {
-    $('quote-status').textContent = 'No rows to price: price updates need a ticker as the first word of the name and a share count.';
+    if (!auto) $('quote-status').textContent = 'No rows to price: price updates need a ticker as the first word of the name and a share count.';
     return;
   }
   button.disabled = true;
@@ -699,16 +714,25 @@ async function updatePrices() {
       const q = body.quotes?.[tickerOf(r)];
       if (q?.price > 0) { r.price = Math.round(q.price * 10000) / 10000; updated++; }
     }
-    if (updated) state.holdings.pricesAsOf = today();
+    if (updated) {
+      target.holdings.pricesAsOf = today();
+      target.holdings.pricesFetchedAt = new Date().toISOString();
+    }
+    // The person switched dashboards while prices were loading: keep them on that dashboard's
+    // data (saved with its next change) but don't redraw or save the one now on screen.
+    if (state !== target) return;
     const missing = Object.entries(body.errors || {}).map(([sym, why]) => `${sym} (${why})`);
-    $('quote-status').textContent = `Updated ${updated} ${updated === 1 ? 'price' : 'prices'}`
+    $('quote-status').textContent = `${auto ? 'Prices refreshed automatically: updated' : 'Updated'} ${updated} ${updated === 1 ? 'price' : 'prices'}`
       + (missing.length ? ` · not found: ${missing.join(', ')}` : '')
       + (leftAlone ? ` · ${leftAlone} ${leftAlone === 1 ? 'row' : 'rows'} without a ticker and shares left as is` : '')
       + ` · source: ${body.source || 'MCP get_quotes'}`;
     renderHoldings();
     if (updated) holdingsChanged();
   } catch (err) {
-    $('quote-status').textContent = `Price update failed: ${err.message}`;
+    if (state === target) {
+      $('quote-status').textContent = `${auto ? 'Automatic price refresh' : 'Price update'} failed: ${err.message}`
+        + (auto ? ' (showing the saved prices)' : '');
+    }
   } finally {
     button.disabled = false;
   }
@@ -953,6 +977,8 @@ async function openDashboard(id) {
   renderInputs();
   renderHoldings();
   renderOutputs();
+  $('quote-status').textContent = '';
+  maybeAutoRefresh();
 }
 
 function renderHouseholdNote() {
@@ -1043,7 +1069,7 @@ document.addEventListener('DOMContentLoaded', () => {
     holdingsChanged();
   });
   $('holding-import').addEventListener('click', () => $('holding-file').click());
-  $('holding-quotes').addEventListener('click', updatePrices);
+  $('holding-quotes').addEventListener('click', () => updatePrices());
   $('holding-file').addEventListener('change', (e) => {
     if (e.target.files[0]) startImport(e.target.files[0]);
     e.target.value = '';
