@@ -70,6 +70,15 @@ case "$cmd" in
       sudo chown -R 1001:0 "$DATA_HOST_DIR"
     fi
     $SUDO chmod 700 "$DATA_HOST_DIR"
+    # Inside the container "localhost" is the container itself. On macOS an Ollama running on
+    # the Mac is reached as host.containers.internal, so the same .env works for ./run.sh too.
+    EXTRA_ENV=()
+    OLLAMA=$(grep -E '^OLLAMA_URL=' "$ENV_FILE" | tail -1 | cut -d= -f2-)
+    if [[ $MAC == 1 && "$OLLAMA" =~ ^(https?://)(localhost|127\.0\.0\.1)(:|/|$) ]]; then
+      OLLAMA_IN="${OLLAMA/${BASH_REMATCH[2]}/host.containers.internal}"
+      EXTRA_ENV=(-e "OLLAMA_URL=$OLLAMA_IN")
+      echo "Ollama on this Mac: the container uses $OLLAMA_IN"
+    fi
     echo "Starting $CONTAINER ..."
     $SUDO podman rm -f "$CONTAINER" 2>/dev/null || true
     $SUDO podman run -d \
@@ -78,6 +87,7 @@ case "$cmd" in
       -p "$BIND:$PORT:8118" \
       -v "$DATA_HOST_DIR":/app/data:Z \
       --env-file "$ENV_FILE" \
+      ${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"} \
       "$IMAGE"
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
