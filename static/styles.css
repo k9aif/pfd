@@ -248,3 +248,21 @@ table.holdings input[data-field="name"] { min-width: 130px; }
 button.armed { border-color: var(--red); color: var(--red); font-weight: 600; }
 .field .hint.fix-note { color: var(--amber); font-weight: 600; }
 .site-footer { text-align: center; color: var(--muted); font-size: 0.78rem; padding: 0 16px 28px; }
+
+/* Field info: an "i" at the right of the label, opened on hover, focus or tap. */
+.label-wrap { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; position: relative; min-width: 0; }
+.label-wrap label { min-width: 0; }
+.slider-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; font-size: 0.9rem; }
+.slider-head .label-wrap { flex: 1; }
+.info {
+  flex: none; width: 18px; height: 18px; padding: 0; margin-top: 1px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--muted);
+  font: italic 700 11px/16px var(--serif); cursor: help;
+}
+.info:hover, .info:focus-visible { border-color: var(--gold); color: var(--ink); }
+.tip {
+  display: none; position: absolute; z-index: 15; left: 0; top: calc(100% + 6px); width: min(300px, calc(100vw - 48px));
+  background: var(--ink); color: var(--bg); padding: 9px 11px; border-radius: 8px;
+  font-size: 0.8rem; font-weight: 400; line-height: 1.45; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+.info:hover + .tip, .info:focus + .tip, .label-wrap.open .tip { display: block; }

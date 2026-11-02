@@ -87,6 +87,44 @@ const INPUT_GROUPS = [
   },
 ];
 
+// What belongs in each field, shown by the "i" next to its label.
+const INFO = {
+  'cashflow.monthlyTakeHome': 'What lands in your bank account after tax, 401(k) contributions and benefits. Leave out bonuses; they have their own line.',
+  'cashflow.monthlyExpenses': 'Everything you spend today: housing, food, cars, insurance, travel, kids. Your last 12 months of card and bank totals divided by 12 is the honest number.',
+  'cashflow.retirementSpend': 'What your chosen retired life costs per year, after tax, in today\'s dollars. Leave out what stops when you stop working. Healthcare before 65 has its own line.',
+  'cashflow.annualBonus': 'A typical year\'s bonus after tax. Not counted unless you tick the box below: plan on base pay and treat the bonus as extra.',
+  'cashflow.includeBonus': 'Adds bonus / 12 to monthly savings. Leave it off if your bonus varies a lot from year to year.',
+  'profile.age': 'Your age today.',
+  'profile.targetAge': 'When you would like to stop working, or have the choice to. If it comes after your FIRE age, the work is by choice.',
+  'profile.planToAge': 'How long the money must last. 95 is a common planning age; use more if your family lives long.',
+  'accounts.taxable': 'Regular brokerage accounts with no tax advantage, such as an individual or joint account at E*TRADE, Fidelity or Schwab. Use today\'s market value. Company stock has its own line; 401(k)s and IRAs go below.',
+  'accounts.preTax': 'Traditional 401(k), 403(b), 457 and traditional IRA balances. Withdrawals are taxed as income, so the dashboard grosses them up.',
+  'accounts.roth': 'Roth 401(k) and Roth IRA balances. Withdrawals in retirement are tax-free.',
+  'accounts.cash': 'Checking, savings, money market funds and CDs. This is also your emergency reserve; 6 to 24 months of expenses is the usual range.',
+  'property.homeValue': 'What your home would sell for today. It counts in net worth but not as a FIRE asset, because a house pays no bills unless you sell or rent it. A paid-off home helps through lower retirement spending.',
+  'property.mortgage': 'Remaining mortgage balance. Subtracted from net worth.',
+  'property.otherAssets': 'Rental property, a share of a business, collectibles or anything else of value.',
+  'property.otherAssetsCountForFire': 'Tick if these assets will pay for retirement, for example rent income or a planned sale. They then count as investable today.',
+  'property.otherDebts': 'Car loans, student loans, credit cards, a HELOC. Subtracted from investable assets.',
+  'property.otherDebtRate': 'Interest rate on those debts. Above about 6%, paying them off usually beats investing.',
+  'executive.ticker': 'A name for your employer\'s stock, used in the flags and stress tests.',
+  'executive.vestedEquity': 'Employer shares you own outright: vested RSUs, ESPP shares, exercised options. Counted toward FIRE and checked for concentration.',
+  'executive.unvestedEquity': 'Grants that have not vested yet. Left out by default because you lose them if you leave.',
+  'executive.includeUnvested': 'Counts unvested equity as if it had already vested. Optimistic.',
+  'executive.deferredComp': 'Non-qualified deferred compensation. It is an unsecured promise from your employer, so it carries company risk.',
+  'executive.includeDeferredComp': 'Counts deferred compensation toward FIRE.',
+  'executive.drawdownPct': 'What if your company stock fell by this much? Every number on the page moves with it.',
+  'plan.tier': 'The risk level the main numbers use. Advise compares all three against your plan.',
+  'retirement.swr': 'Share of the portfolio withdrawn in the first year of retirement, then kept level after inflation. 4% is the classic 30-year rule; 3.5% suits 40+ year retirements.',
+  'retirement.ssAnnual': 'Your estimated benefit at your start age, in today\'s dollars. Your statement at ssa.gov shows it. Use 0 to leave Social Security out.',
+  'retirement.ssStartAge': 'When you plan to claim, between 62 and 70. Claiming later gives a bigger benefit.',
+  'retirement.healthcareAnnual': 'Health insurance premiums and out-of-pocket costs per year from retirement until Medicare at 65, on top of retirement spend.',
+  'retirement.ordinaryTaxRate': 'Your average (effective) tax rate on 401(k) and IRA withdrawals, not your top bracket.',
+  'retirement.ltcgRate': 'Long-term capital gains rate on taxable sales: 0%, 15% or 20% federal, plus any state tax.',
+  'retirement.taxableGainFraction': 'How much of each taxable sale is gain rather than what you paid. Holdings with cost basis replace this guess.',
+  'retirement.sabbaticalAge': 'Age used by the sabbatical stress test: 12 months with no saving, living off the portfolio.',
+};
+
 const AGE_PATHS = new Set(['profile.age', 'profile.targetAge', 'profile.planToAge', 'retirement.ssStartAge']);
 // Notes for ages just corrected, shown once on the next render of the form.
 let ageNotice = {};
@@ -104,7 +142,10 @@ function fieldHtml(f) {
   const v = get(f.path, fromHoldings ? applied : state);
   const hint = f.hint ? `<span class="hint">${f.hint}</span>` : '';
   const id = `f-${f.path.replace('.', '-')}`;
-  const label = `<label for="${id}">${f.label}${hint}</label>`;
+  const info = INFO[f.path] ? `<button type="button" class="info" aria-label="About ${escapeAttr(f.label)}" aria-describedby="${id}-tip">i</button>
+    <span class="tip" role="tooltip" id="${id}-tip">${escapeHtml(INFO[f.path])}</span>` : '';
+  const labelRow = (inner) => `<div class="label-wrap"><label for="${id}">${inner}</label>${info}</div>`;
+  const label = labelRow(`${f.label}${hint}`);
   switch (f.kind) {
     case 'check':
       return `<div class="field check">${label}<input id="${id}" type="checkbox" data-path="${f.path}" data-kind="check" ${v ? 'checked' : ''}></div>`;
@@ -114,7 +155,7 @@ function fieldHtml(f) {
       return `<div class="field">${label}<select id="${id}" data-path="${f.path}" data-kind="select">${
         f.options.map(([val, text]) => `<option value="${val}" ${val === v ? 'selected' : ''}>${text}</option>`).join('')}</select></div>`;
     case 'range':
-      return `<div class="slider"><label for="${id}"><span>${f.label}</span><b id="${id}-out">${v}%</b></label>
+      return `<div class="slider"><div class="slider-head">${labelRow(f.label)}<b id="${id}-out">${v}%</b></div>
         <input id="${id}" type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${v}" data-path="${f.path}" data-kind="range"></div>`;
     default: {
       const shown = f.kind === 'fraction' ? +(v * 100).toFixed(2)
@@ -125,7 +166,7 @@ function fieldHtml(f) {
       const note = fromHoldings ? '<span class="hint">From holdings</span>'
         : fix ? `<span class="hint fix-note">${escapeHtml(fix)}</span>` : '';
       const display = fromHoldings && f.kind === 'money' ? Math.round(shown) : shown;
-      return `<div class="field"><label for="${id}">${f.label}${suffix}${hint}${note}</label>
+      return `<div class="field">${labelRow(`${f.label}${suffix}${hint}${note}`)}
         <input id="${id}" type="number" inputmode="decimal" step="${step}" min="0" value="${display}" data-path="${f.path}" data-kind="${f.kind}"${fromHoldings ? ' disabled' : ''}></div>`;
     }
   }
@@ -807,6 +848,14 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   $('export-btn').addEventListener('click', exportJson);
   $('reset-btn').addEventListener('click', resetDashboard);
+  document.addEventListener('click', (e) => {
+    const button = e.target.closest('.info');
+    document.querySelectorAll('.label-wrap.open').forEach((w) => { if (w !== button?.parentElement) w.classList.remove('open'); });
+    if (button) button.parentElement.classList.toggle('open');
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') document.querySelectorAll('.label-wrap.open').forEach((w) => w.classList.remove('open'));
+  });
   $('import-btn').addEventListener('click', () => $('import-file').click());
   $('import-file').addEventListener('change', (e) => {
     if (e.target.files[0]) importJson(e.target.files[0]);
