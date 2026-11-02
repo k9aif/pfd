@@ -147,3 +147,10 @@ export function importPositions(text, options = {}) {
   const mapping = { ...found.mapping, ...(options.mapping || {}) };
   return { rows, header: found.index, mapping, ...toHoldings(rows, found.index, mapping, options) };
 }
+
+// The ticker a holdings row can be priced by: the first word of its name, if it looks like one.
+// "VTI · VANGUARD TOTAL..." or "vti" -> "VTI"; "401(k) S&P 500 index" or "Company stock" -> null
+export function tickerOf(row) {
+  const token = String(row.name || '').split(/[\s·]+/)[0].toUpperCase();
+  return /^[A-Z][A-Z0-9]{0,5}([.-][A-Z])?$/.test(token) ? token : null;
+}

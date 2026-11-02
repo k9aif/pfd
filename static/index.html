@@ -65,11 +65,13 @@
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
           <label class="small" style="display:flex;gap:6px;align-items:center">
             <input type="checkbox" id="holdings-use"> Use holdings for account totals and allocation</label>
+          <button type="button" id="holding-quotes" title="Latest prices for rows with a ticker and shares" hidden>Update prices</button>
           <button type="button" id="holding-import" title="Positions CSV downloaded from your brokerage">Import CSV</button>
           <input id="holding-file" type="file" accept=".csv,text/csv,.xls,.xlsx" hidden>
           <button type="button" id="holding-add" class="primary">Add holding</button>
         </div>
       </div>
+      <p class="small muted" id="quote-status" aria-live="polite"></p>
       <div id="import-panel" class="import-panel" hidden></div>
       <div class="table-wrap"><table id="holdings" class="holdings"></table></div>
       <p class="small" id="holdings-totals"></p>

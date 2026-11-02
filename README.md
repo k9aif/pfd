@@ -46,6 +46,15 @@ line come from these rows, and cost basis replaces the assumed capital-gains sha
 
 ![Holdings, allocation and projections](docs/screenshots/holdings.png)
 
+**Import CSV:** download "positions" from your brokerage (E*TRADE, Fidelity, Schwab, Vanguard and
+others) and pick the file. It is parsed in your browser and only the resulting holdings are saved.
+The importer skips the brokerage's preamble and total rows, reads the account type per row where the
+file names it, and shows a preview with adjustable column mapping before you add or replace rows.
+
+**Update prices (optional):** with `PFD_MCP_URL` pointing at an MCP server that has a `get_quotes`
+tool, one click refreshes the price of every row that has a ticker and shares. Only ticker symbols
+are sent, and only to that server.
+
 ### What-if simulator and stress tests
 
 ![What-if and stress tests](docs/screenshots/whatif-stress.png)
@@ -124,6 +133,7 @@ On macOS it uses the rootless Podman machine (starting it if needed). The contai
 | `PFD_PORT` | Port for `./run.sh` (default 8118) |
 | `PFD_BIND` | Container bind address. `127.0.0.1` (default) is this computer only; `0.0.0.0` opens it to your network with no extra protection |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | Optional local model for the plain-English explanation. `http://localhost:11434` works for both `./run.sh` and the container on macOS |
+| `PFD_MCP_URL` | Optional MCP server (streamable HTTP) with a `get_quotes` tool for **Update prices** |
 | `PFD_REPO_URL` | Shown in the landing page's "Run your own" box |
 | `PFD_PUBLIC_DEMO`, `PFD_TRUST_PROXY` | Hosted demo mode, see [Hosting a public demo](#hosting-a-public-demo) |
 

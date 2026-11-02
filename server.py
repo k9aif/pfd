@@ -66,6 +66,10 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "").rstrip("/")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "")
 OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "180"))
 REPO_URL = os.environ.get("PFD_REPO_URL", "").strip()
+# Optional: an MCP server with a get_quotes tool (e.g. k9x_mcp_server) for "Update prices".
+# Only ticker symbols are sent to it; it is the only part that talks to a quote service.
+MCP_URL = os.environ.get("PFD_MCP_URL", "").strip()
+MAX_QUOTE_SYMBOLS = 60
 
 
 def build_info() -> dict[str, str]:
@@ -383,6 +387,66 @@ def render_page(name: str) -> bytes:
     return html.encode("utf-8")
 
 
+class MCPError(Exception):
+    pass
+
+
+def _jsonrpc_reply(body: str, content_type: str, want_id) -> dict | None:
+    """Streamable HTTP answers with plain JSON or an SSE stream; find the reply to `want_id`."""
+    if not body.strip():
+        return None
+    if "text/event-stream" in content_type:
+        for line in body.splitlines():
+            if line.startswith("data:"):
+                msg = json.loads(line[5:].strip() or "{}")
+                if msg.get("id") == want_id:
+                    return msg
+        return None
+    msg = json.loads(body)
+    return msg if not isinstance(msg, list) else next((m for m in msg if m.get("id") == want_id), None)
+
+
+def mcp_call_tool(url: str, tool: str, arguments: dict, timeout: int = 30) -> dict:
+    """Calls one tool on an MCP server over streamable HTTP: initialize, initialized, tools/call."""
+    session = None
+
+    def post(payload: dict) -> dict | None:
+        nonlocal session
+        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+        if session:
+            headers["Mcp-Session-Id"] = session
+        request = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method="POST")
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            session = response.headers.get("Mcp-Session-Id") or session
+            return _jsonrpc_reply(response.read().decode("utf-8", "replace"),
+                                  response.headers.get("Content-Type", ""), payload.get("id"))
+
+    init = post({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18", "capabilities": {},
+        "clientInfo": {"name": "personal-financial-dashboard", "version": BUILD["version"]}}})
+    if not init or "error" in init:
+        raise MCPError(f"MCP initialize failed: {(init or {}).get('error', 'no reply')}")
+    post({"jsonrpc": "2.0", "method": "notifications/initialized"})
+    reply = post({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": tool, "arguments": arguments}})
+    if not reply:
+        raise MCPError(f"no reply from MCP tool {tool}")
+    if "error" in reply:
+        raise MCPError(f"MCP tool {tool}: {reply['error'].get('message', reply['error'])}")
+    result = reply.get("result") or {}
+    text = next((c.get("text") for c in result.get("content") or [] if c.get("type") == "text"), "")
+    if result.get("isError"):
+        raise MCPError(f"MCP tool {tool} failed: {text or 'no detail'}")
+    structured = result.get("structuredContent")
+    if isinstance(structured, dict):
+        # FastMCP wraps a plain dict return as {"result": {...}}.
+        inner = structured.get("result")
+        return inner if set(structured) == {"result"} and isinstance(inner, dict) else structured
+    try:
+        return json.loads(text)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise MCPError(f"MCP tool {tool} returned no JSON") from exc
+
+
 def recommended_tier(brief: str) -> str:
     m = re.search(r"Recommended tier by rule: ([^.\n]+)", brief)
     return m.group(1).strip() if m else "stated below"
@@ -510,6 +574,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {
                 "user": user, "users": list(USERS), "dashboards": dashboard_ids(), "household": HOUSEHOLD,
                 "llm": bool(OLLAMA_URL and OLLAMA_MODEL), "model": OLLAMA_MODEL,
+                "quotes": bool(MCP_URL) and not PUBLIC_DEMO,
                 "demo": DEMO, "publicDemo": PUBLIC_DEMO, "repoUrl": REPO_URL, **BUILD,
             })
         elif path == "/api/dashboards":
@@ -553,6 +618,11 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/logout":
             end_session(self.cookie(SESSION_COOKIE))
             self.send_json(HTTPStatus.OK, {"ok": True}, {"Set-Cookie": self.session_cookie("", 0)})
+        elif self.path == "/api/quotes":
+            if self.user():
+                self.quotes()
+            else:
+                self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "sign in first"})
         elif self.path == "/api/advise":
             if self.user():
                 self.advise()
@@ -583,6 +653,25 @@ class Handler(BaseHTTPRequestHandler):
         clear_failures(ip)
         token = new_session(name)
         self.send_json(HTTPStatus.OK, {"user": name}, {"Set-Cookie": self.session_cookie(token, session_idle_seconds())})
+
+    def quotes(self) -> None:
+        if PUBLIC_DEMO or not MCP_URL:
+            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "Price updates are not set up (PFD_MCP_URL in .env)."})
+            return
+        try:
+            symbols = self.read_json().get("symbols")
+            if not isinstance(symbols, list) or not symbols or len(symbols) > MAX_QUOTE_SYMBOLS:
+                raise ValueError(f"send 1 to {MAX_QUOTE_SYMBOLS} symbols")
+            symbols = [str(x)[:16] for x in symbols]
+        except (ValueError, json.JSONDecodeError, AttributeError) as exc:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        try:
+            self.send_json(HTTPStatus.OK, mcp_call_tool(MCP_URL, "get_quotes", {"symbols": symbols}))
+        except MCPError as exc:
+            self.send_json(HTTPStatus.BAD_GATEWAY, {"error": str(exc)})
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            self.send_json(HTTPStatus.BAD_GATEWAY, {"error": f"could not reach the MCP server at {MCP_URL}: {exc}"})
 
     def advise(self) -> None:
         if not (OLLAMA_URL and OLLAMA_MODEL):

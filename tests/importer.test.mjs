@@ -77,3 +77,14 @@ test('accountFromName', () => {
   assert.equal(imp.accountFromName('My account'), null);
   assert.equal(imp.accountFromName('Individual'), 'taxable');
 });
+
+test('tickerOf finds the ticker a row can be priced by', () => {
+  assert.equal(imp.tickerOf({ name: 'VTI · VANGUARD TOTAL STOCK MARKET ETF' }), 'VTI');
+  assert.equal(imp.tickerOf({ name: 'vxus' }), 'VXUS');
+  assert.equal(imp.tickerOf({ name: 'BRK.B' }), 'BRK.B');
+  assert.equal(imp.tickerOf({ name: 'FXAIX · FIDELITY 500 INDEX FUND' }), 'FXAIX');
+  assert.equal(imp.tickerOf({ name: '401(k) S&P 500 index' }), null);
+  assert.equal(imp.tickerOf({ name: 'Company stock' }), null);
+  assert.equal(imp.tickerOf({ name: 'High-yield savings' }), null);
+  assert.equal(imp.tickerOf({ name: '' }), null);
+});

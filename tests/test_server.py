@@ -1,6 +1,7 @@
 """Server tests. Run: python3 -m unittest discover -s tests -p 'test_*.py'"""
 
 import http.client
+from http.server import BaseHTTPRequestHandler
 import json
 import sys
 import tempfile
@@ -325,3 +326,56 @@ class PublicDemo(unittest.TestCase):
             self.assertNotIn(tokens[0], server._sessions)
         finally:
             server.MAX_DEMO_SESSIONS = saved
+
+
+class FakeMCP(BaseHTTPRequestHandler):
+    """Minimal streamable-HTTP MCP server answering in SSE, like FastMCP can."""
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        msg = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if "id" not in msg:
+            self.send_response(202)
+            self.end_headers()
+            return
+        if msg["method"] == "initialize":
+            result = {"protocolVersion": "2025-06-18", "capabilities": {}, "serverInfo": {"name": "fake"}}
+        elif msg["params"]["name"] == "get_quotes":
+            data = {"quotes": {s: {"price": 100.0} for s in msg["params"]["arguments"]["symbols"] if s != "BAD"},
+                    "errors": {"BAD": "unknown symbol"}, "source": "fake"}
+            result = {"content": [{"type": "text", "text": json.dumps(data)}], "structuredContent": {"result": data}}
+        else:
+            result = {"content": [{"type": "text", "text": "Unknown tool"}], "isError": True}
+        body = f"event: message\ndata: {json.dumps({'jsonrpc': '2.0', 'id': msg['id'], 'result': result})}\n\n".encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Mcp-Session-Id", "s1")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class Quotes(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.mcp = server.ThreadingHTTPServer(("127.0.0.1", 0), FakeMCP)
+        threading.Thread(target=cls.mcp.serve_forever, daemon=True).start()
+        cls.url = f"http://127.0.0.1:{cls.mcp.server_address[1]}/mcp"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.mcp.shutdown()
+
+    def test_sse_reply_and_wrapped_structured_content(self):
+        r = server.mcp_call_tool(self.url, "get_quotes", {"symbols": ["VTI", "BAD"]})
+        self.assertEqual(r["quotes"]["VTI"]["price"], 100.0)
+        self.assertEqual(r["errors"]["BAD"], "unknown symbol")
+
+    def test_tool_errors_are_raised_not_swallowed(self):
+        with self.assertRaises(server.MCPError):
+            server.mcp_call_tool(self.url, "nope", {})
+
+    def test_unreachable_server_raises(self):
+        with self.assertRaises(OSError):
+            server.mcp_call_tool("http://127.0.0.1:9/mcp", "get_quotes", {"symbols": ["VTI"]}, timeout=2)

@@ -5,7 +5,7 @@ import {
 } from './finance.js';
 import { SUCCESS_GOAL, adviceBrief, evaluateTiers, personalFlags } from './advice.js';
 import { donut, lineChart, progressRing } from './charts.js';
-import { ROLES, importPositions } from './importer.js';
+import { ROLES, importPositions, tickerOf } from './importer.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -674,6 +674,46 @@ function onHoldingInput(e) {
 
 const today = () => new Date().toLocaleDateString('en-CA');
 
+// ---- Price updates -------------------------------------------------------------
+// Asks the server, which asks the MCP server's get_quotes tool. Only ticker symbols are sent.
+
+async function updatePrices() {
+  const button = $('holding-quotes');
+  const rows = state.holdings.rows;
+  const priced = rows.filter((r) => r.assetClass !== 'cash' && Number(r.shares) > 0 && tickerOf(r));
+  const leftAlone = rows.length - priced.length;
+  if (!priced.length) {
+    $('quote-status').textContent = 'No rows to price: price updates need a ticker as the first word of the name and a share count.';
+    return;
+  }
+  button.disabled = true;
+  $('quote-status').textContent = `Getting prices for ${new Set(priced.map(tickerOf)).size} symbols…`;
+  try {
+    const res = await fetch('/api/quotes', {
+      method: 'POST', headers: WRITE_HEADERS, body: JSON.stringify({ symbols: [...new Set(priced.map(tickerOf))] }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    let updated = 0;
+    for (const r of priced) {
+      const q = body.quotes?.[tickerOf(r)];
+      if (q?.price > 0) { r.price = Math.round(q.price * 10000) / 10000; updated++; }
+    }
+    if (updated) state.holdings.pricesAsOf = today();
+    const missing = Object.entries(body.errors || {}).map(([sym, why]) => `${sym} (${why})`);
+    $('quote-status').textContent = `Updated ${updated} ${updated === 1 ? 'price' : 'prices'}`
+      + (missing.length ? ` · not found: ${missing.join(', ')}` : '')
+      + (leftAlone ? ` · ${leftAlone} ${leftAlone === 1 ? 'row' : 'rows'} without a ticker and shares left as is` : '')
+      + ` · source: ${body.source || 'MCP get_quotes'}`;
+    renderHoldings();
+    if (updated) holdingsChanged();
+  } catch (err) {
+    $('quote-status').textContent = `Price update failed: ${err.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 // ---- CSV import ---------------------------------------------------------------
 // The file is read and parsed here in the browser; only the holdings it produces are saved.
 
@@ -880,6 +920,7 @@ async function load() {
     return;
   }
   $('who').textContent = displayName(me.user);
+  $('holding-quotes').hidden = !me.quotes;
   if (me.version) $('version').textContent = `Personal Financial Dashboard version ${me.version} · build ${me.commit} · deployed ${me.built}`;
   if (me.demo) $('who').textContent = 'Demo mode';
   if (me.publicDemo) {
@@ -1002,6 +1043,7 @@ document.addEventListener('DOMContentLoaded', () => {
     holdingsChanged();
   });
   $('holding-import').addEventListener('click', () => $('holding-file').click());
+  $('holding-quotes').addEventListener('click', updatePrices);
   $('holding-file').addEventListener('change', (e) => {
     if (e.target.files[0]) startImport(e.target.files[0]);
     e.target.value = '';
